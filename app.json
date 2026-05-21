@@ -1,0 +1,49 @@
+{
+  "expo": {
+    "name": "辉哥 Draw",
+    "slug": "huige-draw",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "huigedraw",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.huige.draw",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSPhotoLibraryUsageDescription": "用于选择参考图进行 AI 图像编辑。",
+        "NSPhotoLibraryAddUsageDescription": "用于保存生成的图片。",
+        "NSCameraUsageDescription": "用于拍摄参考图。",
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true,
+          "NSExceptionDomains": {
+            "192.168.2.104": {
+              "NSExceptionAllowsInsecureHTTPLoads": true,
+              "NSIncludesSubdomains": true
+            }
+          }
+        }
+      },
+      "icon": "./assets/icon.png"
+    },
+    "extra": {
+      "defaultApiBase": "http://192.168.2.104:8848",
+      "eas": {
+        "projectId": "22b8fa83-0b79-436f-a751-e3cd58a1a064"
+      }
+    },
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#f5efe6"
+    },
+    "owner": "liudaye",
+    "cli": {
+      "appVersionSource": "remote"
+    }
+  }
+}

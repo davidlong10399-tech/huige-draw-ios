@@ -1,0 +1,104 @@
+name: Build unsigned iOS IPA
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-ios-unsigned:
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate native iOS project
+        run: npx expo prebuild --platform ios --clean
+
+      - name: Install CocoaPods
+        working-directory: ios
+        run: pod install
+
+      - name: Debug iOS project files
+        run: |
+          echo "=== repo root ==="
+          pwd
+          ls -la
+          echo "=== ios files ==="
+          find ios -maxdepth 3 -print
+
+      - name: Build unsigned archive
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd ios
+
+          WORKSPACE="$(find . -maxdepth 1 -type d -name "*.xcworkspace" -print -quit | sed 's#^\./##')"
+
+          if [ -z "$WORKSPACE" ]; then
+            echo "No .xcworkspace found"
+            ls -la
+            exit 1
+          fi
+
+          echo "Using workspace: $WORKSPACE"
+
+          SCHEME="$(xcodebuild -list -json -workspace "$WORKSPACE" | ruby -e 'require "json"; data=JSON.parse(STDIN.read); puts(data.dig("workspace","schemes")&.first || "")')"
+
+          if [ -z "$SCHEME" ]; then
+            echo "No scheme found"
+            xcodebuild -list -workspace "$WORKSPACE"
+            exit 1
+          fi
+
+          echo "Using scheme: $SCHEME"
+
+          ARCHIVE_PATH="$(pwd)/build/$SCHEME.xcarchive"
+          mkdir -p build
+
+          xcodebuild archive \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath "$ARCHIVE_PATH" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            SKIP_INSTALL=NO
+
+          APP_PATH="$(find "$ARCHIVE_PATH/Products/Applications" -maxdepth 1 -type d -name "*.app" -print -quit || true)"
+
+          if [ -z "$APP_PATH" ]; then
+            echo "App not found. Archive contents:"
+            find "$ARCHIVE_PATH" -maxdepth 6 -print
+            exit 1
+          fi
+
+          echo "Using app: $APP_PATH"
+
+          EXPORT_DIR="$(pwd)/build/unsigned-ipa"
+          rm -rf "$EXPORT_DIR"
+          mkdir -p "$EXPORT_DIR/Payload"
+          cp -R "$APP_PATH" "$EXPORT_DIR/Payload/"
+
+          cd "$EXPORT_DIR"
+          zip -qry "../huige-draw-unsigned.ipa" Payload
+          ls -lh "../huige-draw-unsigned.ipa"
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: huige-draw-unsigned-ipa
+          path: ios/build/huige-draw-unsigned.ipa
+          if-no-files-found: error
