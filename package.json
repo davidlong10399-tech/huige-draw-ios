@@ -11,12 +11,12 @@
     "build:ios": "eas build --platform ios"
   },
   "dependencies": {
-    "@expo/vector-icons": "latest",
-    "expo": "latest",
-    "expo-image-picker": "latest",
-    "expo-status-bar": "latest",
-    "react": "latest",
-    "react-native": "latest"
+    "@expo/vector-icons": "^15.0.3",
+    "expo": "54.0.34",
+    "expo-image-picker": "~17.0.11",
+    "expo-status-bar": "~3.0.9",
+    "react": "19.1.0",
+    "react-native": "0.81.5"
   },
   "devDependencies": {
     "@types/react": "latest",
