@@ -53,6 +53,7 @@ export async function generateImage(config: DirectApiConfig, payload: { prompt: 
 }
 
 export async function editImage(config: DirectApiConfig, payload: { prompt: string; size: string; images: RefImage[] }) {
+  if (!payload.images?.length) throw new Error('参考图编辑需要先上传图片');
   const baseUrl = normalizeBaseUrl(config.apiBase);
   let lastErr = '';
   for (const ep of ['/v1/images/edits', '/v1/images/edit']) {
