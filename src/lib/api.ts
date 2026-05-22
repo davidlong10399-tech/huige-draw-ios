@@ -1,4 +1,4 @@
-export const DEFAULT_API_BASE = 'https://api.sharehub.club';
+export const DEFAULT_API_BASE = 'https://pucoding.com';
 export const DEFAULT_IMAGE_MODEL = 'gpt-image-2';
 export const DEFAULT_ASSISTANT_MODEL = 'claude-sonnet-4-6';
 
