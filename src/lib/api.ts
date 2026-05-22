@@ -25,18 +25,62 @@ async function postJson<T>(config: DirectApiConfig, path: string, body: unknown)
   if (!res.ok || json.error) throw new Error(json.error?.message || json.error || json.raw || `HTTP ${res.status}`);
   return json as T;
 }
+function asImageUrl(item: any): string {
+  if (!item) return '';
+  if (typeof item === 'string') {
+    if (/^https?:\/\//i.test(item) || item.startsWith('data:image/') || item.startsWith('file:')) return item;
+    if (/^[A-Za-z0-9+/=\r\n]+$/.test(item) && item.length > 100) return `data:image/png;base64,${item.replace(/\s+/g, '')}`;
+    return '';
+  }
+  if (typeof item.url === 'string' && item.url) return item.url;
+  if (typeof item.image_url === 'string' && item.image_url) return item.image_url;
+  if (typeof item.image === 'string' && item.image) return asImageUrl(item.image);
+  if (typeof item.b64_json === 'string' && item.b64_json) return `data:image/png;base64,${item.b64_json}`;
+  if (typeof item.base64 === 'string' && item.base64) return `data:image/png;base64,${item.base64}`;
+  if (typeof item.png_base64 === 'string' && item.png_base64) return `data:image/png;base64,${item.png_base64}`;
+  return '';
+}
+function pickImageCandidate(raw: any) {
+  const pools = [
+    raw?.data,
+    raw?.images,
+    raw?.output,
+    raw?.results,
+    raw?.result?.images,
+    raw?.result,
+    raw?.image,
+  ];
+  for (const pool of pools) {
+    if (Array.isArray(pool)) {
+      for (const item of pool) {
+        const url = asImageUrl(item);
+        if (url) return { item, url };
+      }
+    } else if (pool) {
+      const url = asImageUrl(pool);
+      if (url) return { item: pool, url };
+    }
+  }
+  const direct = asImageUrl(raw);
+  if (direct) return { item: raw, url: direct };
+  return null;
+}
 function parseImageResponse(raw: any, prompt: string) {
-  const item = raw?.data?.[0];
-  if (!item?.url && !item?.b64_json) throw new Error('未返回图片');
-  return { type: 'image' as const, url: item.url || `data:image/png;base64,${item.b64_json}`, revised_prompt: item.revised_prompt || prompt, prompt };
+  const found = pickImageCandidate(raw);
+  if (!found?.url) {
+    const keys = Object.keys(raw || {}).slice(0, 10).join(', ') || '无字段';
+    throw new Error(`PuCoding 已返回响应，但未识别到图片字段（keys: ${keys}）`);
+  }
+  const revised = found.item?.revised_prompt || raw?.revised_prompt || prompt;
+  return { type: 'image' as const, url: found.url, revised_prompt: revised, prompt };
 }
 function sizeValue(size: string) {
   return size === '16:9' ? '1792x1024' : size === '9:16' ? '1024x1792' : '1024x1024';
 }
 
 export async function askAssistant(config: DirectApiConfig, payload: { prompt: string; mode: string; refCount: number }) {
-  const system = '你是一个顶级 AI 视觉创作导演，服务对象是“辉哥 Draw”移动生图工作台。你的任务不是闲聊，而是像截图里的专业创作助手一样：给出有审美、有执行性的中文建议。只输出严格 JSON，不要 Markdown，不要编号，不要代码块。格式必须是 {"message":"一段80-160字中文建议","chips":["短标签1","短标签2","短标签3","短标签4"]}。message 要包含主体、构图、光影、质感、可执行改法；chips 是可点击补充词，每个不超过8个字。';
-  const user = `模式：${payload.mode === 'edit' ? '参考图编辑/以图改图' : '文生图'}\n参考图数量：${payload.refCount}\n当前提示词：${payload.prompt || '空'}\n请给出下一步创作建议。`;
+  const system = '你是一个顶级AI视觉创作导演，服务对象是“画刃”移动生图工作台。你的任务不是闲聊，而是给出有审美、有执行性的中文建议。只输出严格 JSON，不要 Markdown，不要编号，不要代码块。格式必须是 {"message":"一段80-160字中文建议","chips":["短标签","短标签","短标签","短标签"]}。message 要包含主体、构图、光影、质感、可执行改法；chips 是可点击补充词，每个不超过6个字。';
+  const user = `模式：${payload.mode === 'edit' ? '参考图编辑/以图改图' : '文生图'}\n参考图数量：${payload.refCount}\n当前提示词：${payload.prompt || '无'}\n请给出下一步创作建议。`;
   const data = await postJson<any>(config, '/v1/chat/completions', { model: config.assistantModel, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], temperature: 0.45, max_tokens: 700 });
   const raw = String(data.choices?.[0]?.message?.content || '').trim();
   let parsed: any = null;
@@ -78,7 +122,7 @@ export async function editImage(config: DirectApiConfig, payload: { prompt: stri
 }
 
 export async function optimizePrompt(config: DirectApiConfig, prompt: string) {
-  const system = '你是专业AI绘图提示词优化师。把用户输入优化成适合 gpt-image-2 的中文绘图提示词。输出一段可直接用于生图的中文提示词，包含主体、构图、光影、材质、背景、画幅/镜头，不解释，不编号。';
+  const system = '你是专业AI绘图提示词优化师。把用户输入优化成适合 gpt-image-2 的中文绘图提示词。输出一段可直接用于生图的中文提示词，包含主体、构图、光影、材质、背景、画质、镜头，不解释，不编号。';
   const data = await postJson<any>(config, '/v1/chat/completions', { model: config.assistantModel, messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }], temperature: 0.45, max_tokens: 700 });
   return { optimized: String(data.choices?.[0]?.message?.content || prompt).trim(), source: 'ai', model: config.assistantModel };
 }
