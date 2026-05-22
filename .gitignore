@@ -5,6 +5,8 @@ build/
 ios/
 android/
 *.log
+artifacts/
+artifacts-direct/
 .DS_Store
 .env
 .env.*
