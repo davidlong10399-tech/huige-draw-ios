@@ -29,7 +29,8 @@ function makeId() { return `${Date.now()}-${Math.random().toString(16).slice(2)}
 
 async function makeUploadableRef(asset: { uri: string; fileName?: string | null; mimeType?: string | null }, index = 0): Promise<RefImage> {
   const converted = await ImageManipulator.manipulateAsync(asset.uri, [], { compress: 0.92, format: ImageManipulator.SaveFormat.JPEG });
-  return { name: asset.fileName?.replace(/\.[^.]+$/, '') || `ref-${Date.now()}-${index}`, uri: converted.uri, mimeType: 'image/jpeg' };
+  const baseName = asset.fileName?.replace(/\.[^.]+$/, '') || `ref-${Date.now()}-${index}`;
+  return { name: `${baseName}.jpg`, uri: converted.uri, mimeType: 'image/jpeg' };
 }
 
 async function persistImage(result: GenerateResult) {
@@ -255,7 +256,7 @@ export default function App() {
       const saved = item.localUri ? item : await persistImage(item);
       const uri = saved.localUri || saved.url;
       if (!uri.startsWith('file:')) throw new Error('无法把这张图转换成本地参考图文件');
-      setRefs([{ name: 'generated-reference.jpg', uri, mimeType: 'image/jpeg' }]);
+      setRefs([{ name: 'generated-reference.png', uri, mimeType: 'image/png' }]);
       setMode('edit');
       setPrompt('在这张图基础上，');
       setSelected(null);
