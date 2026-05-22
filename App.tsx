@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Image, KeyboardAvoidingView, Modal, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
+import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
@@ -25,6 +26,11 @@ const stylePrompts: Record<string, string> = {
 
 function sleep(ms: number) { return new Promise(resolve => setTimeout(resolve, ms)); }
 function makeId() { return `${Date.now()}-${Math.random().toString(16).slice(2)}`; }
+
+async function makeUploadableRef(asset: { uri: string; fileName?: string | null; mimeType?: string | null }, index = 0): Promise<RefImage> {
+  const converted = await ImageManipulator.manipulateAsync(asset.uri, [], { compress: 0.92, format: ImageManipulator.SaveFormat.JPEG });
+  return { name: asset.fileName?.replace(/\.[^.]+$/, '') || `ref-${Date.now()}-${index}`, uri: converted.uri, mimeType: 'image/jpeg' };
+}
 
 async function persistImage(result: GenerateResult) {
   if (!FileSystem.documentDirectory) return result;
@@ -173,7 +179,7 @@ export default function App() {
     const next = [...refs];
     for (const asset of r.assets) {
       if (next.length >= 4) break;
-      if (asset.uri) next.push({ name: asset.fileName || `ref-${Date.now()}.jpg`, uri: asset.uri, mimeType: asset.mimeType || 'image/jpeg' });
+      if (asset.uri) next.push(await makeUploadableRef(asset, next.length));
     }
     setRefs(next);
     if (next.length) setMode('edit');
@@ -244,12 +250,18 @@ export default function App() {
     }
   }
 
-  function editAgain(item: GenerateResult) {
-    const uri = item.localUri || item.url;
-    setRefs([{ name: 'generated-reference.png', uri, mimeType: 'image/png' }]);
-    setMode('edit');
-    setPrompt('在这张图基础上，');
-    setSelected(null);
+  async function editAgain(item: GenerateResult) {
+    try {
+      const saved = item.localUri ? item : await persistImage(item);
+      const uri = saved.localUri || saved.url;
+      if (!uri.startsWith('file:')) throw new Error('无法把这张图转换成本地参考图文件');
+      setRefs([{ name: 'generated-reference.jpg', uri, mimeType: 'image/jpeg' }]);
+      setMode('edit');
+      setPrompt('在这张图基础上，');
+      setSelected(null);
+    } catch (e: any) {
+      Alert.alert('再次修改失败', e.message || String(e));
+    }
   }
 
   function clearHistory() {
