@@ -1,10 +1,10 @@
 {
   "expo": {
-    "name": "辉哥 Draw",
-    "slug": "huige-draw",
+    "name": "画刃",
+    "slug": "huaren",
     "version": "0.1.0",
     "orientation": "portrait",
-    "scheme": "huigedraw",
+    "scheme": "huaren",
     "userInterfaceStyle": "light",
     "assetBundlePatterns": [
       "**/*"
@@ -30,7 +30,7 @@
       "icon": "./assets/icon.png"
     },
     "extra": {
-      "defaultApiBase": "http://192.168.2.104:8848",
+      "defaultApiBase": "https://pucoding.com",
       "eas": {
         "projectId": "22b8fa83-0b79-436f-a751-e3cd58a1a064"
       }
@@ -38,8 +38,8 @@
     "icon": "./assets/icon.png",
     "splash": {
       "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#f5efe6"
+      "resizeMode": "cover",
+      "backgroundColor": "#124146"
     },
     "owner": "liudaye",
     "cli": {
