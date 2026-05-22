@@ -28,7 +28,7 @@ async function postJson<T>(config: DirectApiConfig, path: string, body: unknown)
 function asImageUrl(item: any): string {
   if (!item) return '';
   if (typeof item === 'string') {
-    if (/^https?:\/\//i.test(item) || item.startsWith('data:image/') || item.startsWith('file:')) return item;
+    if (/^https?:\/\//i.test(item) || item.startsWith('data:image/') || item.startsWith('file:') || item.startsWith('/') || item.startsWith('//')) return item;
     if (/^[A-Za-z0-9+/=\r\n]+$/.test(item) && item.length > 100) return `data:image/png;base64,${item.replace(/\s+/g, '')}`;
     return '';
   }
@@ -65,14 +65,19 @@ function pickImageCandidate(raw: any) {
   if (direct) return { item: raw, url: direct };
   return null;
 }
-function parseImageResponse(raw: any, prompt: string) {
+function normalizeImageUrl(url: string, baseUrl: string) {
+  if (url.startsWith('//')) return `https:${url}`;
+  if (url.startsWith('/')) return `${baseUrl}${url}`;
+  return url;
+}
+function parseImageResponse(raw: any, prompt: string, baseUrl: string) {
   const found = pickImageCandidate(raw);
   if (!found?.url) {
     const keys = Object.keys(raw || {}).slice(0, 10).join(', ') || '无字段';
     throw new Error(`PuCoding 已返回响应，但未识别到图片字段（keys: ${keys}）`);
   }
   const revised = found.item?.revised_prompt || raw?.revised_prompt || prompt;
-  return { type: 'image' as const, url: found.url, revised_prompt: revised, prompt };
+  return { type: 'image' as const, url: normalizeImageUrl(found.url, baseUrl), revised_prompt: revised, prompt };
 }
 function sizeValue(size: string) {
   return size === '16:9' ? '1792x1024' : size === '9:16' ? '1024x1792' : '1024x1024';
@@ -93,7 +98,7 @@ export async function askAssistant(config: DirectApiConfig, payload: { prompt: s
 
 export async function generateImage(config: DirectApiConfig, payload: { prompt: string; size: string }) {
   const data = await postJson<any>(config, '/v1/images/generations', { model: config.imageModel, prompt: payload.prompt, n: 1, size: sizeValue(payload.size), response_format: 'b64_json' });
-  return parseImageResponse(data, payload.prompt);
+  return parseImageResponse(data, payload.prompt, normalizeBaseUrl(config.apiBase));
 }
 
 export async function editImage(config: DirectApiConfig, payload: { prompt: string; size: string; images: RefImage[] }) {
@@ -114,7 +119,7 @@ export async function editImage(config: DirectApiConfig, payload: { prompt: stri
     const text = await res.text();
     let json: any = {};
     try { json = text ? JSON.parse(text) : {}; } catch { json = { raw: text }; }
-    if (res.ok && !json.error) return parseImageResponse(json, payload.prompt);
+    if (res.ok && !json.error) return parseImageResponse(json, payload.prompt, baseUrl);
     lastErr = json.error?.message || json.error || json.raw || `HTTP ${res.status}`;
     if (!/404|not found|Invalid URL/i.test(lastErr)) break;
   }

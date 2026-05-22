@@ -207,13 +207,19 @@ export default function App() {
       const raw = mode === 'edit'
         ? await editImage(config, { prompt: fullPrompt, size, images: refs })
         : await generateImage(config, { prompt: fullPrompt, size });
-      const saved = await persistImage({
+      const item: GenerateResult = {
         ...raw,
         id: makeId(),
         prompt: fullPrompt,
         elapsed: Math.round((Date.now() - started) / 1000),
         createdAt: Date.now(),
-      });
+      };
+      let saved: GenerateResult = item;
+      try {
+        saved = await persistImage(item);
+      } catch (saveError: any) {
+        Alert.alert('生成成功，但本地保存失败', saveError?.message || String(saveError));
+      }
       setResults(prev => [saved, ...prev].slice(0, MAX_HISTORY));
       await finishProgress('生成完成');
       setSelected(saved);
