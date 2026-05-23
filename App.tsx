@@ -274,14 +274,36 @@ export default function App() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <StatusBar style="dark" />
+      <StatusBar style="light" />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView style={styles.flex} contentContainerStyle={styles.content}>
           <View style={styles.header}>
             <View style={styles.logo}><Text style={styles.logoText}>刃</Text></View>
             <View style={styles.flex}>
-              <Text style={styles.title}>画刃</Text>
+              <View style={styles.headerTopRow}>
+                <Text style={styles.title}>画刃</Text>
+                <Pressable style={styles.headerAction} onPress={() => setShowSettings(v => !v)}>
+                  <Text style={styles.headerActionText}>{showSettings ? '收起设置' : '展开设置'}</Text>
+                </Pressable>
+              </View>
               <Text style={styles.sub}>{hydrated ? connected : '正在恢复本地配置与作品流...'}</Text>
+            </View>
+          </View>
+
+          <View style={styles.hero}>
+            <View style={styles.rowBetween}>
+              <View style={styles.flex}>
+                <Text style={styles.heroEyebrow}>AI Studio 工作台</Text>
+                <Text style={styles.heroTitle}>把提示词、参考图和生成结果放到一条流里处理。</Text>
+              </View>
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>{mode === 'generate' ? '文生图' : '以图改图'}</Text>
+              </View>
+            </View>
+            <View style={styles.statsRow}>
+              <View style={styles.statPill}><Text style={styles.statLabel}>参考图</Text><Text style={styles.statValue}>{refs.length}/4</Text></View>
+              <View style={styles.statPill}><Text style={styles.statLabel}>作品</Text><Text style={styles.statValue}>{results.length}</Text></View>
+              <View style={styles.statPill}><Text style={styles.statLabel}>状态</Text><Text style={styles.statValue}>{hydrated ? (generating ? '生成中' : '待命') : '恢复中'}</Text></View>
             </View>
           </View>
 
@@ -297,19 +319,19 @@ export default function App() {
             </View>
             {showSettings && <>
               <Text style={styles.label}>API Base URL</Text>
-              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} value={apiBase} onChangeText={setApiBase} placeholder="https://pucoding.com" />
+              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} value={apiBase} onChangeText={setApiBase} placeholder="https://pucoding.com" placeholderTextColor="#927c66" />
               <Text style={styles.label}>API Key</Text>
-              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} secureTextEntry value={apiKey} onChangeText={setApiKey} placeholder="sk-..." />
+              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} secureTextEntry value={apiKey} onChangeText={setApiKey} placeholder="sk-..." placeholderTextColor="#927c66" />
               <Text style={styles.label}>生图模型</Text>
-              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} value={imageModel} onChangeText={setImageModel} />
+              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} value={imageModel} onChangeText={setImageModel} placeholderTextColor="#927c66" />
               <Text style={styles.label}>助手模型</Text>
-              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} value={assistantModel} onChangeText={setAssistantModel} />
+              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} value={assistantModel} onChangeText={setAssistantModel} placeholderTextColor="#927c66" />
               <Pressable style={styles.testButton} onPress={checkHealth}><Text style={styles.testButtonText}>测试连接</Text></Pressable>
             </>}
           </View>
 
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>创作参数</Text>
+            <Text style={styles.cardTitle}>创作面板</Text>
             <View style={styles.segment}>
               {(['generate', 'edit'] as Mode[]).map(m => (
                 <Pressable key={m} style={[styles.segmentItem, mode === m && styles.segmentActive]} onPress={() => setMode(m)}>
@@ -317,10 +339,13 @@ export default function App() {
                 </Pressable>
               ))}
             </View>
-            <TextInput style={styles.input} multiline placeholder="输入你想生成的画面" value={prompt} onChangeText={setPrompt} />
-            <Pressable style={[styles.testButton, optimizing && styles.disabled]} onPress={runOptimize} disabled={optimizing || !hydrated}>
-              <Text style={styles.testButtonText}>{optimizing ? '优化中...' : 'AI 优化提示词'}</Text>
-            </Pressable>
+            <TextInput style={styles.input} multiline placeholder="输入你想生成的画面" placeholderTextColor="#927c66" value={prompt} onChangeText={setPrompt} />
+            <View style={styles.inlineActionRow}>
+              <Pressable style={[styles.inlineAction, optimizing && styles.disabled]} onPress={runOptimize} disabled={optimizing || !hydrated}>
+                <Text style={styles.inlineActionText}>{optimizing ? '优化中...' : 'AI 优化提示词'}</Text>
+              </Pressable>
+              <View style={styles.inlineHint}><Text style={styles.inlineHintText}>先写一句，再让模型帮你收紧表达</Text></View>
+            </View>
             <Text style={styles.label}>风格</Text>
             <View style={styles.chips}>
               {stylesList.map(s => (
@@ -337,7 +362,10 @@ export default function App() {
                 </Pressable>
               ))}
             </View>
-            <Pressable style={styles.upload} onPress={pickImages}><Text style={styles.uploadText}>{refs.length ? `已选 ${refs.length} 张参考图` : '上传参考图'}</Text></Pressable>
+            <Pressable style={styles.upload} onPress={pickImages}>
+              <Text style={styles.uploadText}>{refs.length ? `已选 ${refs.length} 张参考图` : '上传参考图'}</Text>
+              <Text style={styles.uploadSub}>{refs.length ? '点缩略图可移除单张参考图' : '最多 4 张，先选图再切到以图改图更顺手'}</Text>
+            </Pressable>
             {!!refs.length && <View style={styles.refRow}>{refs.map((r, i) => <Pressable key={i} onPress={() => setRefs(refs.filter((_, idx) => idx !== i))}><Image source={{ uri: r.uri }} style={styles.refImg} /></Pressable>)}</View>}
             {!!progress && <View style={styles.progressWrap}><View style={[styles.progressBar, { width: `${Math.round(progress * 100)}%` }]} /><Text style={styles.progressText}>{progressText} · {Math.round(progress * 100)}%</Text></View>}
             {editBlocked && <Text style={styles.warnText}>以图改图需要先上传参考图；没有参考图时不会请求接口，避免上游报错和浪费额度。</Text>}
@@ -350,20 +378,22 @@ export default function App() {
             <View style={styles.rowBetween}>
               <View>
                 <Text style={styles.cardTitle}>作品流</Text>
-                <Text style={styles.sub}>点击图片可放大、保存、再次修改</Text>
+                <Text style={styles.sub}>点开看大图，保存相册，或者直接再次修改</Text>
               </View>
               {!!results.length && <Pressable style={styles.smallButton} onPress={clearHistory}><Text>清空</Text></Pressable>}
             </View>
             {!results.length && <Text style={styles.sub}>{hydrated ? '暂无作品' : '正在恢复作品流...'}</Text>}
-            {results.map((r, i) => (
-              <Pressable key={r.id || `${r.url}-${i}`} style={styles.resultCard} onPress={() => setSelected(r)}>
-                <Image source={{ uri: r.localUri || r.url }} style={styles.resultImg} />
-                <View style={styles.resultActions}>
-                  <Text style={styles.sub}>{r.elapsed ? `${r.elapsed}s` : ''}</Text>
-                  <Pressable style={styles.smallButton} onPress={() => editAgain(r)}><Text>再次修改</Text></Pressable>
-                </View>
-              </Pressable>
-            ))}
+            <View style={styles.resultGrid}>
+              {results.map((r, i) => (
+                <Pressable key={r.id || `${r.url}-${i}`} style={styles.resultCard} onPress={() => setSelected(r)}>
+                  <Image source={{ uri: r.localUri || r.url }} style={styles.resultImg} />
+                  <View style={styles.resultActions}>
+                    <Text style={styles.sub}>{r.elapsed ? `${r.elapsed}s` : ''}</Text>
+                    <Pressable style={styles.smallButton} onPress={() => editAgain(r)}><Text>再次修改</Text></Pressable>
+                  </View>
+                </Pressable>
+              ))}
+            </View>
           </View>
         </ScrollView>
 
@@ -389,53 +419,72 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#f5efe6' },
+  safe: { flex: 1, backgroundColor: '#0d0f14' },
   flex: { flex: 1 },
   content: { padding: 16, paddingBottom: 42 },
   header: { flexDirection: 'row', gap: 12, alignItems: 'center', marginBottom: 14 },
-  logo: { width: 48, height: 48, borderRadius: 16, backgroundColor: '#15110d', alignItems: 'center', justifyContent: 'center' },
-  logoText: { color: '#f3cb62', fontWeight: '900', fontSize: 24 },
-  title: { fontSize: 24, fontWeight: '900', color: '#201915' },
-  sub: { color: '#8c7a66', fontSize: 12, marginTop: 3 },
-  card: { backgroundColor: '#fffaf2', borderWidth: 1, borderColor: '#eadcc9', borderRadius: 24, padding: 16, marginBottom: 14, shadowColor: '#563718', shadowOpacity: 0.12, shadowRadius: 18, shadowOffset: { width: 0, height: 8 } },
-  cardTitle: { fontSize: 17, fontWeight: '900', color: '#201915' },
+  logo: { width: 48, height: 48, borderRadius: 16, backgroundColor: '#f4b63f', alignItems: 'center', justifyContent: 'center' },
+  logoText: { color: '#10131a', fontWeight: '900', fontSize: 24 },
+  headerTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  headerAction: { borderWidth: 1, borderColor: '#2a313d', backgroundColor: '#11151c', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
+  headerActionText: { color: '#d4deef', fontSize: 12, fontWeight: '800' },
+  title: { fontSize: 24, fontWeight: '900', color: '#f5f7fb' },
+  sub: { color: '#8a94a6', fontSize: 12, marginTop: 3 },
+  hero: { backgroundColor: '#121721', borderWidth: 1, borderColor: '#222a36', borderRadius: 24, padding: 16, marginBottom: 14 },
+  heroEyebrow: { color: '#f4b63f', fontSize: 12, fontWeight: '900', letterSpacing: 0 },
+  heroTitle: { color: '#f5f7fb', fontSize: 18, fontWeight: '900', lineHeight: 24, marginTop: 8 },
+  badge: { alignSelf: 'flex-start', backgroundColor: '#f4b63f', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
+  badgeText: { color: '#10131a', fontSize: 12, fontWeight: '900' },
+  statsRow: { flexDirection: 'row', gap: 8, marginTop: 14, flexWrap: 'wrap' },
+  statPill: { flexGrow: 1, minWidth: 92, borderRadius: 16, borderWidth: 1, borderColor: '#243043', backgroundColor: '#0f141c', paddingHorizontal: 12, paddingVertical: 10 },
+  statLabel: { color: '#8a94a6', fontSize: 11 },
+  statValue: { color: '#f5f7fb', fontSize: 15, fontWeight: '900', marginTop: 4 },
+  card: { backgroundColor: '#121721', borderWidth: 1, borderColor: '#222a36', borderRadius: 24, padding: 16, marginBottom: 14, shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 18, shadowOffset: { width: 0, height: 8 } },
+  cardTitle: { fontSize: 17, fontWeight: '900', color: '#f5f7fb' },
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
-  chip: { borderWidth: 1, borderColor: '#eadcc9', backgroundColor: '#fff7ea', paddingHorizontal: 12, paddingVertical: 9, borderRadius: 999 },
-  chipActive: { backgroundColor: '#15110d', borderColor: '#15110d' },
-  chipText: { color: '#725d46', fontSize: 12 },
-  chipActiveText: { color: 'white', fontSize: 12 },
-  smallButton: { backgroundColor: '#fff7ea', borderWidth: 1, borderColor: '#eadcc9', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 9 },
-  segment: { flexDirection: 'row', backgroundColor: '#f5eadc', borderRadius: 16, padding: 4, marginTop: 14 },
+  chip: { borderWidth: 1, borderColor: '#2a313d', backgroundColor: '#0f141c', paddingHorizontal: 12, paddingVertical: 9, borderRadius: 999 },
+  chipActive: { backgroundColor: '#f4b63f', borderColor: '#f4b63f' },
+  chipText: { color: '#c2cad6', fontSize: 12 },
+  chipActiveText: { color: '#10131a', fontSize: 12, fontWeight: '900' },
+  smallButton: { backgroundColor: '#0f141c', borderWidth: 1, borderColor: '#2a313d', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 9 },
+  segment: { flexDirection: 'row', backgroundColor: '#0f141c', borderRadius: 16, padding: 4, marginTop: 14, borderWidth: 1, borderColor: '#243043' },
   segmentItem: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 13 },
-  segmentActive: { backgroundColor: '#15110d' },
-  segmentText: { color: '#725d46' },
-  segmentTextActive: { color: 'white', fontWeight: '800' },
-  input: { minHeight: 130, borderWidth: 1, borderColor: '#eadcc9', borderRadius: 18, padding: 12, backgroundColor: '#fffdf8', marginTop: 14, textAlignVertical: 'top', lineHeight: 22 },
-  singleInput: { height: 46, borderWidth: 1, borderColor: '#eadcc9', borderRadius: 14, paddingHorizontal: 12, backgroundColor: '#fffdf8', marginTop: 8 },
-  label: { marginTop: 14, fontWeight: '800', color: '#6d5b47' },
-  testButton: { height: 46, backgroundColor: '#15110d', borderRadius: 15, alignItems: 'center', justifyContent: 'center', marginTop: 14 },
-  testButtonFlex: { flex: 1, height: 48, backgroundColor: '#15110d', borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
-  testButtonText: { color: 'white', fontWeight: '900' },
-  upload: { borderWidth: 2, borderStyle: 'dashed', borderColor: '#d8c7b2', backgroundColor: '#fffdf8', borderRadius: 18, minHeight: 78, alignItems: 'center', justifyContent: 'center', marginTop: 14 },
-  uploadText: { color: '#725d46', fontWeight: '800' },
-  refRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  segmentActive: { backgroundColor: '#f4b63f' },
+  segmentText: { color: '#9aa5b6' },
+  segmentTextActive: { color: '#10131a', fontWeight: '900' },
+  input: { minHeight: 150, borderWidth: 1, borderColor: '#2a313d', borderRadius: 18, padding: 12, backgroundColor: '#0f141c', marginTop: 14, textAlignVertical: 'top', lineHeight: 22, color: '#f5f7fb' },
+  singleInput: { height: 46, borderWidth: 1, borderColor: '#2a313d', borderRadius: 14, paddingHorizontal: 12, backgroundColor: '#0f141c', marginTop: 8, color: '#f5f7fb' },
+  label: { marginTop: 14, fontWeight: '800', color: '#c2cad6' },
+  testButton: { height: 46, backgroundColor: '#f4b63f', borderRadius: 15, alignItems: 'center', justifyContent: 'center', marginTop: 14 },
+  testButtonFlex: { flex: 1, height: 48, backgroundColor: '#f4b63f', borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  testButtonText: { color: '#10131a', fontWeight: '900' },
+  inlineActionRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12 },
+  inlineAction: { height: 44, paddingHorizontal: 14, backgroundColor: '#f4b63f', borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  inlineActionText: { color: '#10131a', fontWeight: '900' },
+  inlineHint: { flex: 1, borderRadius: 14, borderWidth: 1, borderColor: '#243043', backgroundColor: '#0f141c', paddingHorizontal: 12, paddingVertical: 10 },
+  inlineHintText: { color: '#8a94a6', fontSize: 12, lineHeight: 16 },
+  upload: { borderWidth: 1.5, borderStyle: 'dashed', borderColor: '#354154', backgroundColor: '#0f141c', borderRadius: 18, minHeight: 84, alignItems: 'center', justifyContent: 'center', marginTop: 14, paddingHorizontal: 12 },
+  uploadText: { color: '#f5f7fb', fontWeight: '900' },
+  uploadSub: { color: '#8a94a6', fontSize: 12, marginTop: 4, textAlign: 'center', lineHeight: 16 },
+  refRow: { flexDirection: 'row', gap: 8, marginTop: 10, flexWrap: 'wrap' },
   refImg: { width: 70, height: 70, borderRadius: 14 },
-  progressWrap: { height: 30, backgroundColor: '#f2e4d3', borderRadius: 999, overflow: 'hidden', marginTop: 14, justifyContent: 'center' },
-  progressBar: { position: 'absolute', left: 0, top: 0, bottom: 0, backgroundColor: '#e56f26' },
-  progressText: { textAlign: 'center', fontWeight: '900', fontSize: 12, color: '#201915' },
-  generate: { height: 54, backgroundColor: '#e56f26', borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginTop: 16 },
-  disabled: { opacity: 0.6 },
+  progressWrap: { height: 30, backgroundColor: '#0f141c', borderRadius: 999, overflow: 'hidden', marginTop: 14, justifyContent: 'center', borderWidth: 1, borderColor: '#243043' },
+  progressBar: { position: 'absolute', left: 0, top: 0, bottom: 0, backgroundColor: '#f4b63f' },
+  progressText: { textAlign: 'center', fontWeight: '900', fontSize: 12, color: '#f5f7fb' },
+  generate: { height: 56, backgroundColor: '#ff7a1a', borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginTop: 16 },
+  disabled: { opacity: 0.58 },
   generateText: { color: 'white', fontSize: 16, fontWeight: '900' },
-  resultCard: { marginTop: 12, borderRadius: 22, overflow: 'hidden', backgroundColor: 'white', borderWidth: 1, borderColor: '#eadcc9' },
+  resultGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 12 },
+  resultCard: { width: '48%', borderRadius: 20, overflow: 'hidden', backgroundColor: '#0f141c', borderWidth: 1, borderColor: '#243043' },
   resultImg: { width: '100%', aspectRatio: 1 },
-  resultActions: { padding: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  modalSafe: { flex: 1, backgroundColor: '#111' },
+  resultActions: { padding: 10, gap: 8 },
+  modalSafe: { flex: 1, backgroundColor: '#090b0f' },
   modalImg: { flex: 1, width: '100%' },
-  modalPanel: { backgroundColor: '#fffaf2', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 16 },
-  modalPrompt: { color: '#6d5b47', lineHeight: 20, marginTop: 8 },
+  modalPanel: { backgroundColor: '#121721', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 16, borderTopWidth: 1, borderColor: '#222a36' },
+  modalPrompt: { color: '#c2cad6', lineHeight: 20, marginTop: 8 },
   modalActions: { flexDirection: 'row', gap: 10, marginTop: 14 },
   closeButton: { height: 46, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
-  warnText: { marginTop: 12, color: '#dc2626', fontSize: 12, lineHeight: 18, fontWeight: '700' },
-  closeText: { fontWeight: '900', color: '#725d46' },
+  warnText: { marginTop: 12, color: '#ff8a8a', fontSize: 12, lineHeight: 18, fontWeight: '700' },
+  closeText: { fontWeight: '900', color: '#d4deef' },
 });
