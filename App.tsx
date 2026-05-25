@@ -9,9 +9,22 @@ import { StatusBar } from 'expo-status-bar';
 import { editImage, generateImage, health, DEFAULT_API_BASE, DEFAULT_ASSISTANT_MODEL, DEFAULT_IMAGE_MODEL, DirectApiConfig, GenerateResult, optimizePrompt, RefImage } from './src/lib/api';
 
 type Mode = 'generate' | 'edit';
-type SavedConfig = DirectApiConfig & { showSettings?: boolean };
+type SavedConfig = {
+  imageApiBase?: string;
+  imageApiKey?: string;
+  imageModel?: string;
+  textApiBase?: string;
+  textApiKey?: string;
+  textModel?: string;
+  showSettings?: boolean;
+  // backward compatibility with v3
+  apiBase?: string;
+  apiKey?: string;
+  assistantModel?: string;
+};
 
-const CONFIG_KEY = 'huige-draw-direct-config-v3';
+const CONFIG_KEY = 'huige-draw-direct-config-v4';
+const LEGACY_CONFIG_KEY = 'huige-draw-direct-config-v3';
 const HISTORY_KEY = 'huige-draw-history-v3';
 const MAX_HISTORY = 50;
 const stylesList = ['商业海报', '电影感', '真实摄影', '国潮', '产品摄影', '赛博朋克'];
@@ -74,10 +87,12 @@ async function filterExistingResults(items: GenerateResult[]) {
 
 export default function App() {
   const [hydrated, setHydrated] = useState(false);
-  const [apiBase, setApiBase] = useState(DEFAULT_API_BASE);
-  const [apiKey, setApiKey] = useState('');
+  const [imageApiBase, setImageApiBase] = useState(DEFAULT_API_BASE);
+  const [imageApiKey, setImageApiKey] = useState('');
   const [imageModel, setImageModel] = useState(DEFAULT_IMAGE_MODEL);
-  const [assistantModel, setAssistantModel] = useState(DEFAULT_ASSISTANT_MODEL);
+  const [textApiBase, setTextApiBase] = useState(DEFAULT_API_BASE);
+  const [textApiKey, setTextApiKey] = useState('');
+  const [textModel, setTextModel] = useState(DEFAULT_ASSISTANT_MODEL);
   const [showSettings, setShowSettings] = useState(true);
   const [connected, setConnected] = useState('请填写 API Key 后测试连接');
   const [mode, setMode] = useState<Mode>('generate');
@@ -93,9 +108,11 @@ export default function App() {
   const [selected, setSelected] = useState<GenerateResult | null>(null);
   const progressTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const config: DirectApiConfig = useMemo(() => ({ apiBase, apiKey, imageModel, assistantModel }), [apiBase, apiKey, imageModel, assistantModel]);
+  const imageConfig: DirectApiConfig = useMemo(() => ({ apiBase: imageApiBase, apiKey: imageApiKey, imageModel, assistantModel: textModel }), [imageApiBase, imageApiKey, imageModel, textModel]);
+  const textConfig: DirectApiConfig = useMemo(() => ({ apiBase: textApiBase, apiKey: textApiKey, imageModel, assistantModel: textModel }), [textApiBase, textApiKey, imageModel, textModel]);
   const fullPrompt = useMemo(() => [prompt.trim(), stylePrompts[style] || ''].filter(Boolean).join('，'), [prompt, style]);
-  const maskedKey = apiKey ? `${apiKey.slice(0, 6)}****${apiKey.slice(-4)}` : '未填写';
+  const maskedImageKey = imageApiKey ? `${imageApiKey.slice(0, 6)}****${imageApiKey.slice(-4)}` : '未填写';
+  const maskedTextKey = textApiKey ? `${textApiKey.slice(0, 6)}****${textApiKey.slice(-4)}` : '未填写';
   const editBlocked = mode === 'edit' && refs.length === 0;
   const generateDisabled = generating || optimizing || editBlocked || !hydrated;
 
@@ -103,13 +120,17 @@ export default function App() {
     let alive = true;
     (async () => {
       try {
-        const saved = await AsyncStorage.getItem(CONFIG_KEY);
+        const saved = await AsyncStorage.getItem(CONFIG_KEY) || await AsyncStorage.getItem(LEGACY_CONFIG_KEY);
         if (saved && alive) {
           const c = JSON.parse(saved) as SavedConfig;
-          setApiBase(c.apiBase || DEFAULT_API_BASE);
-          setApiKey(typeof c.apiKey === 'string' ? c.apiKey : '');
+          const legacyBase = c.apiBase || DEFAULT_API_BASE;
+          const legacyKey = typeof c.apiKey === 'string' ? c.apiKey : '';
+          setImageApiBase(c.imageApiBase || legacyBase);
+          setImageApiKey(typeof c.imageApiKey === 'string' ? c.imageApiKey : legacyKey);
           setImageModel(c.imageModel || DEFAULT_IMAGE_MODEL);
-          setAssistantModel(c.assistantModel || DEFAULT_ASSISTANT_MODEL);
+          setTextApiBase(c.textApiBase || legacyBase);
+          setTextApiKey(typeof c.textApiKey === 'string' ? c.textApiKey : legacyKey);
+          setTextModel(c.textModel || c.assistantModel || DEFAULT_ASSISTANT_MODEL);
           setShowSettings(c.showSettings ?? false);
         }
         const h = await AsyncStorage.getItem(HISTORY_KEY);
@@ -128,8 +149,8 @@ export default function App() {
 
   useEffect(() => {
     if (!hydrated) return;
-    AsyncStorage.setItem(CONFIG_KEY, JSON.stringify({ apiBase, apiKey, imageModel, assistantModel, showSettings })).catch(() => {});
-  }, [hydrated, apiBase, apiKey, imageModel, assistantModel, showSettings]);
+    AsyncStorage.setItem(CONFIG_KEY, JSON.stringify({ imageApiBase, imageApiKey, imageModel, textApiBase, textApiKey, textModel, showSettings })).catch(() => {});
+  }, [hydrated, imageApiBase, imageApiKey, imageModel, textApiBase, textApiKey, textModel, showSettings]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -159,18 +180,18 @@ export default function App() {
   }
 
   const checkHealth = useCallback(async () => {
-    if (!apiKey.trim()) {
-      setConnected('请先填写 API Key');
+    if (!imageApiKey.trim()) {
+      setConnected('请先填写生图 API Key');
       return;
     }
-    setConnected('测试连接中...');
+    setConnected('测试生图连接中...');
     try {
-      const h = await health(config);
-      setConnected(`直连正常 · ${h.imageModel || imageModel}`);
+      const h = await health(imageConfig);
+      setConnected(`生图接口正常 · ${h.imageModel || imageModel}`);
     } catch (e: any) {
-      setConnected(`连接失败：${e.message}`);
+      setConnected(`生图连接失败：${e.message}`);
     }
-  }, [apiKey, config, imageModel]);
+  }, [imageApiKey, imageConfig, imageModel]);
 
   async function pickImages() {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -187,12 +208,12 @@ export default function App() {
   }
 
   async function runOptimize() {
-    if (!apiKey.trim()) return Alert.alert('缺少 API Key', '请先在设置里填写 API Key。');
+    if (!textApiKey.trim()) return Alert.alert('缺少文本 API Key', '请先在设置里填写提示词优化 API Key。');
     if (!prompt.trim()) return Alert.alert('先输入提示词');
     setOptimizing(true);
     startProgress('正在优化提示词');
     try {
-      const r = await optimizePrompt(config, prompt);
+      const r = await optimizePrompt(textConfig, prompt);
       setPrompt(r.optimized);
       await finishProgress('优化完成');
     } catch (e: any) {
@@ -204,7 +225,7 @@ export default function App() {
   }
 
   async function runGenerate() {
-    if (!apiKey.trim()) return Alert.alert('缺少 API Key', '请先在设置里填写 API Key。');
+    if (!imageApiKey.trim()) return Alert.alert('缺少生图 API Key', '请先在设置里填写生图 API Key。');
     if (!fullPrompt.trim()) return Alert.alert('先输入提示词');
     if (mode === 'edit' && !refs.length) return Alert.alert('缺少参考图', '以图改图必须先上传参考图。请先点“上传参考图”，或切回“文生图”。');
     setGenerating(true);
@@ -212,8 +233,8 @@ export default function App() {
     try {
       const started = Date.now();
       const raw = mode === 'edit'
-        ? await editImage(config, { prompt: fullPrompt, size, images: refs })
-        : await generateImage(config, { prompt: fullPrompt, size });
+        ? await editImage(imageConfig, { prompt: fullPrompt, size, images: refs })
+        : await generateImage(imageConfig, { prompt: fullPrompt, size });
       const item: GenerateResult = {
         ...raw,
         id: makeId(),
@@ -310,23 +331,27 @@ export default function App() {
           <View style={styles.card}>
             <View style={styles.rowBetween}>
               <View>
-                <Text style={styles.cardTitle}>直连接口设置</Text>
-                <Text style={styles.sub}>配置会自动保存 · Key：{maskedKey}</Text>
+                <Text style={styles.cardTitle}>接口设置</Text>
+                <Text style={styles.sub}>生图 Key：{maskedImageKey} · 文本 Key：{maskedTextKey}</Text>
               </View>
               <Pressable style={styles.smallButton} onPress={() => setShowSettings(v => !v)}>
                 <Text>{showSettings ? '收起' : '展开'}</Text>
               </Pressable>
             </View>
             {showSettings && <>
-              <Text style={styles.label}>API Base URL</Text>
-              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} value={apiBase} onChangeText={setApiBase} placeholder="https://pucoding.com" placeholderTextColor="#927c66" />
-              <Text style={styles.label}>API Key</Text>
-              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} secureTextEntry value={apiKey} onChangeText={setApiKey} placeholder="sk-..." placeholderTextColor="#927c66" />
+              <Text style={styles.label}>生图 API Base URL</Text>
+              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} value={imageApiBase} onChangeText={setImageApiBase} placeholder="https://api.sharehub.club" placeholderTextColor="#927c66" />
+              <Text style={styles.label}>生图 API Key</Text>
+              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} secureTextEntry value={imageApiKey} onChangeText={setImageApiKey} placeholder="sk-image..." placeholderTextColor="#927c66" />
               <Text style={styles.label}>生图模型</Text>
-              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} value={imageModel} onChangeText={setImageModel} placeholderTextColor="#927c66" />
-              <Text style={styles.label}>助手模型</Text>
-              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} value={assistantModel} onChangeText={setAssistantModel} placeholderTextColor="#927c66" />
-              <Pressable style={styles.testButton} onPress={checkHealth}><Text style={styles.testButtonText}>测试连接</Text></Pressable>
+              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} value={imageModel} onChangeText={setImageModel} placeholder="gpt-image-2" placeholderTextColor="#927c66" />
+              <Text style={styles.label}>提示词优化 API Base URL</Text>
+              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} value={textApiBase} onChangeText={setTextApiBase} placeholder="https://api.sharehub.club" placeholderTextColor="#927c66" />
+              <Text style={styles.label}>提示词优化 API Key</Text>
+              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} secureTextEntry value={textApiKey} onChangeText={setTextApiKey} placeholder="sk-text..." placeholderTextColor="#927c66" />
+              <Text style={styles.label}>文本模型</Text>
+              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} value={textModel} onChangeText={setTextModel} placeholder="claude-sonnet-4-6" placeholderTextColor="#927c66" />
+              <Pressable style={styles.testButton} onPress={checkHealth}><Text style={styles.testButtonText}>测试生图连接</Text></Pressable>
             </>}
           </View>
 
