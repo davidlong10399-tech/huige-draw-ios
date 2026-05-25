@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Image, KeyboardAvoidingView, Modal, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
@@ -6,6 +6,7 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
+import { useKeepAwake } from 'expo-keep-awake';
 import { editImage, generateImage, health, DEFAULT_API_BASE, DEFAULT_ASSISTANT_MODEL, DEFAULT_IMAGE_MODEL, DirectApiConfig, GenerateResult, optimizePrompt, RefImage } from './src/lib/api';
 
 type Mode = 'generate' | 'edit';
@@ -115,6 +116,7 @@ export default function App() {
   const maskedTextKey = textApiKey ? `${textApiKey.slice(0, 6)}****${textApiKey.slice(-4)}` : '未填写';
   const editBlocked = mode === 'edit' && refs.length === 0;
   const generateDisabled = generating || optimizing || editBlocked || !hydrated;
+  useKeepAwake(generating || optimizing ? 'huaren-active-task' : undefined);
 
   useEffect(() => {
     let alive = true;
@@ -513,3 +515,4 @@ const styles = StyleSheet.create({
   warnText: { marginTop: 12, color: '#ff8a8a', fontSize: 12, lineHeight: 18, fontWeight: '700' },
   closeText: { fontWeight: '900', color: '#d4deef' },
 });
+
