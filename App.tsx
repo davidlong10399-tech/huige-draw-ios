@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Image, KeyboardAvoidingView, Modal, Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
@@ -7,9 +7,11 @@ import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
 import { useKeepAwake } from 'expo-keep-awake';
+import * as Clipboard from 'expo-clipboard';
 import { editImage, generateImage, health, DEFAULT_API_BASE, DEFAULT_ASSISTANT_MODEL, DEFAULT_IMAGE_MODEL, DirectApiConfig, GenerateResult, optimizePrompt, RefImage } from './src/lib/api';
 
 type Mode = 'generate' | 'edit';
+type Tab = 'create' | 'gallery' | 'settings';
 type SavedConfig = {
   imageApiBase?: string;
   imageApiKey?: string;
@@ -94,7 +96,8 @@ export default function App() {
   const [textApiBase, setTextApiBase] = useState(DEFAULT_API_BASE);
   const [textApiKey, setTextApiKey] = useState('');
   const [textModel, setTextModel] = useState(DEFAULT_ASSISTANT_MODEL);
-  const [showSettings, setShowSettings] = useState(true);
+  const [showSettings, setShowSettings] = useState(false);
+  const [tab, setTab] = useState<Tab>('create');
   const [connected, setConnected] = useState('请填写 API Key 后测试连接');
   const [mode, setMode] = useState<Mode>('generate');
   const [prompt, setPrompt] = useState('');
@@ -116,7 +119,8 @@ export default function App() {
   const maskedTextKey = textApiKey ? `${textApiKey.slice(0, 6)}****${textApiKey.slice(-4)}` : '未填写';
   const editBlocked = mode === 'edit' && refs.length === 0;
   const generateDisabled = generating || optimizing || editBlocked || !hydrated;
-  useKeepAwake(generating || optimizing ? 'huaren-active-task' : undefined);
+  const activeTask = generating || optimizing;
+  useKeepAwake(activeTask ? 'huaren-active-task' : undefined);
 
   useEffect(() => {
     let alive = true;
@@ -281,11 +285,19 @@ export default function App() {
       if (!uri.startsWith('file:')) throw new Error('无法把这张图转换成本地参考图文件');
       setRefs([{ name: 'generated-reference.png', uri, mimeType: 'image/png' }]);
       setMode('edit');
+      setTab('create');
       setPrompt('在这张图基础上，');
       setSelected(null);
     } catch (e: any) {
       Alert.alert('再次修改失败', e.message || String(e));
     }
+  }
+
+  async function copyPrompt(text?: string) {
+    const value = (text || '').trim();
+    if (!value) return Alert.alert('没有可复制的提示词');
+    await Clipboard.setStringAsync(value);
+    Alert.alert('已复制', '提示词已复制到剪贴板。');
   }
 
   function clearHistory() {
@@ -305,124 +317,148 @@ export default function App() {
             <View style={styles.flex}>
               <View style={styles.headerTopRow}>
                 <Text style={styles.title}>画刃</Text>
-                <Pressable style={styles.headerAction} onPress={() => setShowSettings(v => !v)}>
-                  <Text style={styles.headerActionText}>{showSettings ? '收起设置' : '展开设置'}</Text>
-                </Pressable>
+                <View style={styles.badge}><Text style={styles.badgeText}>{tab === 'create' ? '创作' : tab === 'gallery' ? '作品' : '设置'}</Text></View>
               </View>
               <Text style={styles.sub}>{hydrated ? connected : '正在恢复本地配置与作品流...'}</Text>
             </View>
           </View>
 
-          <View style={styles.hero}>
-            <View style={styles.rowBetween}>
-              <View style={styles.flex}>
-                <Text style={styles.heroEyebrow}>AI Studio 工作台</Text>
-                <Text style={styles.heroTitle}>把提示词、参考图和生成结果放到一条流里处理。</Text>
+          {tab === 'create' && <>
+            <View style={styles.hero}>
+              <View style={styles.rowBetween}>
+                <View style={styles.flex}>
+                  <Text style={styles.heroEyebrow}>AI Studio 工作台</Text>
+                  <Text style={styles.heroTitle}>输入提示词，选参考图，直接出图。</Text>
+                </View>
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>{mode === 'generate' ? '文生图' : '以图改图'}</Text>
+                </View>
               </View>
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>{mode === 'generate' ? '文生图' : '以图改图'}</Text>
+              <View style={styles.statsRow}>
+                <View style={styles.statPill}><Text style={styles.statLabel}>参考图</Text><Text style={styles.statValue}>{refs.length}/4</Text></View>
+                <View style={styles.statPill}><Text style={styles.statLabel}>作品</Text><Text style={styles.statValue}>{results.length}</Text></View>
+                <View style={styles.statPill}><Text style={styles.statLabel}>状态</Text><Text style={styles.statValue}>{activeTask ? '常亮中' : '待命'}</Text></View>
               </View>
             </View>
-            <View style={styles.statsRow}>
-              <View style={styles.statPill}><Text style={styles.statLabel}>参考图</Text><Text style={styles.statValue}>{refs.length}/4</Text></View>
-              <View style={styles.statPill}><Text style={styles.statLabel}>作品</Text><Text style={styles.statValue}>{results.length}</Text></View>
-              <View style={styles.statPill}><Text style={styles.statLabel}>状态</Text><Text style={styles.statValue}>{hydrated ? (generating ? '生成中' : '待命') : '恢复中'}</Text></View>
-            </View>
-          </View>
 
-          <View style={styles.card}>
-            <View style={styles.rowBetween}>
-              <View>
-                <Text style={styles.cardTitle}>接口设置</Text>
-                <Text style={styles.sub}>生图 Key：{maskedImageKey} · 文本 Key：{maskedTextKey}</Text>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>创作面板</Text>
+              <View style={styles.segment}>
+                {(['generate', 'edit'] as Mode[]).map(m => (
+                  <Pressable key={m} style={[styles.segmentItem, mode === m && styles.segmentActive]} onPress={() => setMode(m)}>
+                    <Text style={mode === m ? styles.segmentTextActive : styles.segmentText}>{m === 'generate' ? '文生图' : '以图改图'}</Text>
+                  </Pressable>
+                ))}
               </View>
-              <Pressable style={styles.smallButton} onPress={() => setShowSettings(v => !v)}>
-                <Text>{showSettings ? '收起' : '展开'}</Text>
+              <TextInput style={styles.inputCompact} multiline placeholder="输入你想生成的画面" placeholderTextColor="#927c66" value={prompt} onChangeText={setPrompt} />
+              <View style={styles.inlineActionRow}>
+                <Pressable style={[styles.inlineAction, optimizing && styles.disabled]} onPress={runOptimize} disabled={optimizing || !hydrated}>
+                  <Text style={styles.inlineActionText}>{optimizing ? '优化中...' : '优化'}</Text>
+                </Pressable>
+                <Pressable style={styles.inlineGhost} onPress={() => setPrompt('')} disabled={optimizing || generating}>
+                  <Text style={styles.inlineGhostText}>清空</Text>
+                </Pressable>
+              </View>
+              <Text style={styles.label}>比例</Text>
+              <View style={styles.chips}>
+                {['1:1', '9:16', '16:9'].map(s => (
+                  <Pressable key={s} style={[styles.chip, size === s && styles.chipActive]} onPress={() => setSize(s)}>
+                    <Text style={size === s ? styles.chipActiveText : styles.chipText}>{s}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Text style={styles.label}>风格</Text>
+              <View style={styles.chips}>
+                {stylesList.map(s => (
+                  <Pressable key={s} style={[styles.chip, style === s && styles.chipActive]} onPress={() => setStyle(s)}>
+                    <Text style={style === s ? styles.chipActiveText : styles.chipText}>{s}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Pressable style={styles.upload} onPress={pickImages}>
+                <Text style={styles.uploadText}>{refs.length ? `已选 ${refs.length} 张参考图` : '上传参考图'}</Text>
+                <Text style={styles.uploadSub}>{refs.length ? '点缩略图可移除单张参考图' : '最多 4 张，用于以图改图'}</Text>
+              </Pressable>
+              {!!refs.length && <View style={styles.refRow}>{refs.map((r, i) => <Pressable key={i} onPress={() => setRefs(refs.filter((_, idx) => idx !== i))}><Image source={{ uri: r.uri }} style={styles.refImg} /></Pressable>)}</View>}
+              {!!progress && <View style={styles.progressWrap}><View style={[styles.progressBar, { width: `${Math.round(progress * 100)}%` }]} /><Text style={styles.progressText}>{progressText} · {Math.round(progress * 100)}% · 保持屏幕常亮</Text></View>}
+              {editBlocked && <Text style={styles.warnText}>以图改图需要先上传参考图；没有参考图时不会请求接口。</Text>}
+              <Pressable style={[styles.generate, generateDisabled && styles.disabled]} onPress={runGenerate} disabled={generateDisabled}>
+                <Text style={styles.generateText}>{!hydrated ? '正在恢复数据...' : generating ? '生成中...' : editBlocked ? '请先上传参考图' : '开始生成'}</Text>
               </Pressable>
             </View>
-            {showSettings && <>
-              <Text style={styles.label}>生图 API Base URL</Text>
-              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} value={imageApiBase} onChangeText={setImageApiBase} placeholder="https://api.sharehub.club" placeholderTextColor="#927c66" />
-              <Text style={styles.label}>生图 API Key</Text>
-              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} secureTextEntry value={imageApiKey} onChangeText={setImageApiKey} placeholder="sk-image..." placeholderTextColor="#927c66" />
-              <Text style={styles.label}>生图模型</Text>
-              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} value={imageModel} onChangeText={setImageModel} placeholder="gpt-image-2" placeholderTextColor="#927c66" />
-              <Text style={styles.label}>提示词优化 API Base URL</Text>
-              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} value={textApiBase} onChangeText={setTextApiBase} placeholder="https://api.sharehub.club" placeholderTextColor="#927c66" />
-              <Text style={styles.label}>提示词优化 API Key</Text>
-              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} secureTextEntry value={textApiKey} onChangeText={setTextApiKey} placeholder="sk-text..." placeholderTextColor="#927c66" />
-              <Text style={styles.label}>文本模型</Text>
-              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} value={textModel} onChangeText={setTextModel} placeholder="claude-sonnet-4-6" placeholderTextColor="#927c66" />
-              <Pressable style={styles.testButton} onPress={checkHealth}><Text style={styles.testButtonText}>测试生图连接</Text></Pressable>
-            </>}
-          </View>
+          </>}
 
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>创作面板</Text>
-            <View style={styles.segment}>
-              {(['generate', 'edit'] as Mode[]).map(m => (
-                <Pressable key={m} style={[styles.segmentItem, mode === m && styles.segmentActive]} onPress={() => setMode(m)}>
-                  <Text style={mode === m ? styles.segmentTextActive : styles.segmentText}>{m === 'generate' ? '文生图' : '以图改图'}</Text>
-                </Pressable>
-              ))}
-            </View>
-            <TextInput style={styles.input} multiline placeholder="输入你想生成的画面" placeholderTextColor="#927c66" value={prompt} onChangeText={setPrompt} />
-            <View style={styles.inlineActionRow}>
-              <Pressable style={[styles.inlineAction, optimizing && styles.disabled]} onPress={runOptimize} disabled={optimizing || !hydrated}>
-                <Text style={styles.inlineActionText}>{optimizing ? '优化中...' : 'AI 优化提示词'}</Text>
-              </Pressable>
-              <View style={styles.inlineHint}><Text style={styles.inlineHintText}>先写一句，再让模型帮你收紧表达</Text></View>
-            </View>
-            <Text style={styles.label}>风格</Text>
-            <View style={styles.chips}>
-              {stylesList.map(s => (
-                <Pressable key={s} style={[styles.chip, style === s && styles.chipActive]} onPress={() => setStyle(s)}>
-                  <Text style={style === s ? styles.chipActiveText : styles.chipText}>{s}</Text>
-                </Pressable>
-              ))}
-            </View>
-            <Text style={styles.label}>比例</Text>
-            <View style={styles.chips}>
-              {['1:1', '16:9', '9:16'].map(s => (
-                <Pressable key={s} style={[styles.chip, size === s && styles.chipActive]} onPress={() => setSize(s)}>
-                  <Text style={size === s ? styles.chipActiveText : styles.chipText}>{s}</Text>
-                </Pressable>
-              ))}
-            </View>
-            <Pressable style={styles.upload} onPress={pickImages}>
-              <Text style={styles.uploadText}>{refs.length ? `已选 ${refs.length} 张参考图` : '上传参考图'}</Text>
-              <Text style={styles.uploadSub}>{refs.length ? '点缩略图可移除单张参考图' : '最多 4 张，先选图再切到以图改图更顺手'}</Text>
-            </Pressable>
-            {!!refs.length && <View style={styles.refRow}>{refs.map((r, i) => <Pressable key={i} onPress={() => setRefs(refs.filter((_, idx) => idx !== i))}><Image source={{ uri: r.uri }} style={styles.refImg} /></Pressable>)}</View>}
-            {!!progress && <View style={styles.progressWrap}><View style={[styles.progressBar, { width: `${Math.round(progress * 100)}%` }]} /><Text style={styles.progressText}>{progressText} · {Math.round(progress * 100)}%</Text></View>}
-            {editBlocked && <Text style={styles.warnText}>以图改图需要先上传参考图；没有参考图时不会请求接口，避免上游报错和浪费额度。</Text>}
-            <Pressable style={[styles.generate, generateDisabled && styles.disabled]} onPress={runGenerate} disabled={generateDisabled}>
-              <Text style={styles.generateText}>{!hydrated ? '正在恢复数据...' : generating ? '生成中...' : editBlocked ? '请先上传参考图' : '开始生成'}</Text>
-            </Pressable>
-          </View>
-
-          <View style={styles.card}>
+          {tab === 'gallery' && <View style={styles.card}>
             <View style={styles.rowBetween}>
               <View>
                 <Text style={styles.cardTitle}>作品流</Text>
-                <Text style={styles.sub}>点开看大图，保存相册，或者直接再次修改</Text>
+                <Text style={styles.sub}>点开看大图，保存相册，复制提示词，或者再次修改</Text>
               </View>
-              {!!results.length && <Pressable style={styles.smallButton} onPress={clearHistory}><Text>清空</Text></Pressable>}
+              {!!results.length && <Pressable style={styles.smallButton} onPress={clearHistory}><Text style={styles.smallButtonText}>清空</Text></Pressable>}
             </View>
-            {!results.length && <Text style={styles.sub}>{hydrated ? '暂无作品' : '正在恢复作品流...'}</Text>}
+            {!results.length && <Text style={styles.emptyText}>{hydrated ? '暂无作品，先去创作一张。' : '正在恢复作品流...'}</Text>}
             <View style={styles.resultGrid}>
               {results.map((r, i) => (
                 <Pressable key={r.id || `${r.url}-${i}`} style={styles.resultCard} onPress={() => setSelected(r)}>
                   <Image source={{ uri: r.localUri || r.url }} style={styles.resultImg} />
                   <View style={styles.resultActions}>
                     <Text style={styles.sub}>{r.elapsed ? `${r.elapsed}s` : ''}</Text>
-                    <Pressable style={styles.smallButton} onPress={() => editAgain(r)}><Text>再次修改</Text></Pressable>
+                    <Pressable style={styles.smallButton} onPress={() => editAgain(r)}><Text style={styles.smallButtonText}>再次修改</Text></Pressable>
                   </View>
                 </Pressable>
               ))}
             </View>
-          </View>
+          </View>}
+
+          {tab === 'settings' && <>
+            <View style={styles.card}>
+              <View style={styles.rowBetween}>
+                <View>
+                  <Text style={styles.cardTitle}>生图供应商</Text>
+                  <Text style={styles.sub}>用于文生图和以图改图 · Key：{maskedImageKey}</Text>
+                </View>
+                <Pressable style={styles.smallButton} onPress={checkHealth}><Text style={styles.smallButtonText}>测试</Text></Pressable>
+              </View>
+              <View style={styles.presetRow}>
+                <Pressable style={styles.presetButton} onPress={() => setImageApiBase('https://api.sharehub.club')}><Text style={styles.presetText}>ShareHub</Text></Pressable>
+                <Pressable style={styles.presetButton} onPress={() => setImageApiBase('https://pucoding.com')}><Text style={styles.presetText}>PuCoding</Text></Pressable>
+              </View>
+              <Text style={styles.label}>API Base URL</Text>
+              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} value={imageApiBase} onChangeText={setImageApiBase} placeholder="https://api.sharehub.club" placeholderTextColor="#927c66" />
+              <Text style={styles.label}>API Key</Text>
+              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} secureTextEntry value={imageApiKey} onChangeText={setImageApiKey} placeholder="sk-image..." placeholderTextColor="#927c66" />
+              <Text style={styles.label}>生图模型</Text>
+              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} value={imageModel} onChangeText={setImageModel} placeholder="gpt-image-2" placeholderTextColor="#927c66" />
+            </View>
+
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>提示词优化供应商</Text>
+              <Text style={styles.sub}>用于 AI 优化提示词 · Key：{maskedTextKey}</Text>
+              <View style={styles.presetRow}>
+                <Pressable style={styles.presetButton} onPress={() => setTextApiBase('https://api.sharehub.club')}><Text style={styles.presetText}>ShareHub</Text></Pressable>
+                <Pressable style={styles.presetButton} onPress={() => setTextApiBase('https://pucoding.com')}><Text style={styles.presetText}>PuCoding</Text></Pressable>
+              </View>
+              <Text style={styles.label}>API Base URL</Text>
+              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} value={textApiBase} onChangeText={setTextApiBase} placeholder="https://api.sharehub.club" placeholderTextColor="#927c66" />
+              <Text style={styles.label}>API Key</Text>
+              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} secureTextEntry value={textApiKey} onChangeText={setTextApiKey} placeholder="sk-text..." placeholderTextColor="#927c66" />
+              <Text style={styles.label}>文本模型</Text>
+              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} value={textModel} onChangeText={setTextModel} placeholder="claude-sonnet-4-6" placeholderTextColor="#927c66" />
+            </View>
+          </>}
         </ScrollView>
+
+        <View style={styles.tabBar}>
+          {([
+            ['create', '创作'],
+            ['gallery', '作品'],
+            ['settings', '设置'],
+          ] as [Tab, string][]).map(([key, label]) => (
+            <Pressable key={key} style={[styles.tabItem, tab === key && styles.tabItemActive]} onPress={() => setTab(key)}>
+              <Text style={tab === key ? styles.tabTextActive : styles.tabText}>{label}</Text>
+            </Pressable>
+          ))}
+        </View>
 
         <Modal visible={!!selected} animationType="slide" onRequestClose={() => setSelected(null)}>
           <SafeAreaView style={styles.modalSafe}>
@@ -433,6 +469,7 @@ export default function App() {
                 <Text style={styles.modalPrompt} numberOfLines={4}>{selected.prompt || selected.revised_prompt || ''}</Text>
                 <View style={styles.modalActions}>
                   <Pressable style={styles.testButtonFlex} onPress={() => saveToAlbum(selected)}><Text style={styles.testButtonText}>保存相册</Text></Pressable>
+                  <Pressable style={styles.testButtonFlex} onPress={() => copyPrompt(selected.prompt || selected.revised_prompt)}><Text style={styles.testButtonText}>复制提示词</Text></Pressable>
                   <Pressable style={styles.testButtonFlex} onPress={() => editAgain(selected)}><Text style={styles.testButtonText}>再次修改</Text></Pressable>
                 </View>
                 <Pressable style={styles.closeButton} onPress={() => setSelected(null)}><Text style={styles.closeText}>关闭</Text></Pressable>
@@ -514,5 +551,18 @@ const styles = StyleSheet.create({
   closeButton: { height: 46, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
   warnText: { marginTop: 12, color: '#ff8a8a', fontSize: 12, lineHeight: 18, fontWeight: '700' },
   closeText: { fontWeight: '900', color: '#d4deef' },
+  inputCompact: { minHeight: 118, borderWidth: 1, borderColor: '#2a313d', borderRadius: 18, padding: 12, backgroundColor: '#0f141c', marginTop: 14, textAlignVertical: 'top', lineHeight: 22, color: '#f5f7fb', fontSize: 16 },
+  inlineGhost: { height: 44, paddingHorizontal: 14, borderWidth: 1, borderColor: '#2a313d', backgroundColor: '#0f141c', borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  inlineGhostText: { color: '#d4deef', fontWeight: '900' },
+  presetRow: { flexDirection: 'row', gap: 8, marginTop: 14 },
+  presetButton: { borderWidth: 1, borderColor: '#2a313d', backgroundColor: '#0f141c', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
+  presetText: { color: '#d4deef', fontSize: 12, fontWeight: '900' },
+  smallButtonText: { color: '#d4deef', fontSize: 12, fontWeight: '900' },
+  emptyText: { color: '#8a94a6', fontSize: 13, marginTop: 18, lineHeight: 20 },
+  tabBar: { flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingTop: 10, paddingBottom: Platform.OS === 'ios' ? 18 : 12, backgroundColor: '#0d0f14', borderTopWidth: 1, borderTopColor: '#222a36' },
+  tabItem: { flex: 1, height: 44, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0f141c', borderWidth: 1, borderColor: '#243043' },
+  tabItemActive: { backgroundColor: '#f4b63f', borderColor: '#f4b63f' },
+  tabText: { color: '#9aa5b6', fontWeight: '900' },
+  tabTextActive: { color: '#10131a', fontWeight: '900' },
 });
 
