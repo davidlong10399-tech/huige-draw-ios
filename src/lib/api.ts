@@ -34,6 +34,10 @@ function firstString(...values: any[]): string {
         value.output_text,
         value.message,
         value.value,
+        value.optimized,
+        value.result,
+        value.response,
+        value.data,
         value.url,
         value.image_url,
       );
@@ -45,13 +49,46 @@ function firstString(...values: any[]): string {
 
 function normalizeMaybeBase64(value: string) {
   if (!value) return '';
-  if (value.startsWith('http://') || value.startsWith('https://') || value.startsWith('data:image/') || value.startsWith('file:')) return value;
-  if (value.startsWith('//')) return `https:${value}`;
-  if (value.startsWith('/')) return value;
-  if (/^[A-Za-z0-9+/=\r\n]+$/.test(value) && value.length > 100) {
-    return 'data:image/png;base64,' + value.replace(/\s+/g, '');
+  const trimmed = value.trim();
+  const jsonLike = trimmed.startsWith('{') || trimmed.startsWith('[');
+  if (jsonLike) return trimmed;
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('data:image/') || trimmed.startsWith('file:')) return trimmed;
+  if (trimmed.startsWith('//')) return `https:${trimmed}`;
+  if (trimmed.startsWith('/')) return trimmed;
+  if (/^[A-Za-z0-9+/=\r\n]+$/.test(trimmed) && trimmed.length > 100) {
+    return 'data:image/png;base64,' + trimmed.replace(/\s+/g, '');
   }
-  return value;
+  return trimmed;
+}
+
+function parseJsonText(value: string): any {
+  const trimmed = value.trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/, '').trim();
+  if (!trimmed || (!trimmed.startsWith('{') && !trimmed.startsWith('['))) return null;
+  try { return JSON.parse(trimmed); } catch { return null; }
+}
+
+function deepFindByKeys(value: any, keys: string[], seen = new Set<any>()): string {
+  if (!value) return '';
+  if (typeof value === 'string') return '';
+  if (typeof value !== 'object') return '';
+  if (seen.has(value)) return '';
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = deepFindByKeys(item, keys, seen);
+      if (found) return found;
+    }
+    return '';
+  }
+  for (const key of keys) {
+    const candidate = value[key];
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+  }
+  for (const key of Object.keys(value)) {
+    const found = deepFindByKeys(value[key], keys, seen);
+    if (found) return found;
+  }
+  return '';
 }
 
 function contentText(value: any): string {
@@ -96,14 +133,35 @@ function extractTextResponse(raw: any): string {
   const direct = firstString(
     raw?.output_text,
     raw?.text,
+    raw?.optimized,
+    raw?.result,
     raw?.content_text,
     raw?.response_text,
+    raw?.data?.optimized,
+    raw?.data?.result,
+    raw?.data?.text,
+    raw?.data?.content,
+    raw?.data?.output_text,
+    raw?.data?.message,
+    raw?.data?.choices?.[0]?.message?.content,
+    raw?.data?.choices?.[0]?.text,
     raw?.choices?.[0]?.message?.content,
     raw?.choices?.[0]?.text,
     raw?.choices?.[0]?.delta?.content,
     raw?.choices?.[0]?.content,
   );
-  if (direct) return direct;
+  if (direct) {
+    const parsed = parseJsonText(direct);
+    if (parsed) return extractTextResponse(parsed) || direct;
+    return direct;
+  }
+
+  const deep = deepFindByKeys(raw, ['optimized', 'result', 'output_text', 'text', 'content', 'message', 'response_text']);
+  if (deep) {
+    const parsed = parseJsonText(deep);
+    if (parsed) return extractTextResponse(parsed) || deep;
+    return deep;
+  }
 
   const output = raw?.output;
   if (Array.isArray(output)) {
@@ -230,6 +288,8 @@ function sizeValue(size: string) {
 }
 
 function imageUrlFromResponse(data: Json) {
+  const deep = deepFindByKeys(data, ['url', 'image_url', 'imageUrl', 'image', 'b64_json', 'base64', 'png_base64']);
+  if (deep) return normalizeMaybeBase64(deep);
   const direct = firstString(
     data?.url,
     data?.image,
@@ -375,7 +435,21 @@ export async function editImage(config: DirectApiConfig, payload: { prompt: stri
 
 export async function optimizePrompt(config: DirectApiConfig, prompt: string) {
   const system = '你是专业AI绘图提示词优化师。把用户输入优化成适合 gpt-image-2 的中文绘图提示词。输出一段可直接用于生图的中文提示词，包含主体、构图、光影、材质、背景、画质、镜头，不解释，不编号。';
-  const raw = await requestAssistantText(config, system, prompt);
+  let lastErr = '';
+  for (const path of ['/v1/prompt/optimize', '/v1/prompts/optimize']) {
+    try {
+      const data = await apiPost(config, path, { prompt, model: config.assistantModel });
+      const optimized = extractTextResponse(data);
+      if (optimized) return { optimized, source: 'ai', model: config.assistantModel };
+      lastErr = '优化接口未返回可用文本';
+    } catch (e: any) {
+      lastErr = String(e?.message || e);
+      if (!/404|not found|unsupported|not compatible|invalid|not support/i.test(lastErr)) break;
+    }
+  }
+  const raw = await requestAssistantText(config, system, prompt).catch((e: any) => {
+    throw new Error(lastErr ? `${lastErr}; ${e?.message || e}` : e?.message || String(e));
+  });
   return { optimized: raw || prompt, source: 'ai', model: config.assistantModel };
 }
 
