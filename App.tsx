@@ -259,7 +259,7 @@ export default function App() {
       setPrompt(r.optimized);
       await finishProgress('优化完成');
     } catch (e: any) {
-      stopProgress('优化失败');
+      stopProgress();
       Alert.alert('优化失败', friendlyErrorMessage(e));
     } finally {
       setOptimizing(false);
@@ -294,7 +294,7 @@ export default function App() {
       await finishProgress('生成完成');
       setSelected(saved);
     } catch (e: any) {
-      stopProgress('生成失败');
+      stopProgress();
       Alert.alert('生成失败', friendlyErrorMessage(e));
     } finally {
       setGenerating(false);
@@ -416,7 +416,7 @@ export default function App() {
                 <Text style={styles.uploadSub}>{refs.length ? '点缩略图可移除单张参考图' : '最多 4 张，用于以图改图'}</Text>
               </Pressable>
               {!!refs.length && <View style={styles.refRow}>{refs.map((r, i) => <Pressable key={i} onPress={() => setRefs(refs.filter((_, idx) => idx !== i))}><Image source={{ uri: r.uri }} style={styles.refImg} /></Pressable>)}</View>}
-              {(!!progress || !!progressText) && <View style={styles.progressWrap}><View style={[styles.progressBar, { width: `${Math.round(progress * 100)}%` }]} /><Text style={styles.progressText}>{progress ? `${progressText} · ${Math.round(progress * 100)}% · 保持屏幕常亮` : progressText}</Text></View>}
+              {!!progress && <View style={styles.progressWrap}><View style={[styles.progressBar, { width: `${Math.round(progress * 100)}%` }]} /><Text style={styles.progressText}>{progressText} · {Math.round(progress * 100)}% · 保持屏幕常亮</Text></View>}
               {editBlocked && <Text style={styles.warnText}>以图改图需要先上传参考图；没有参考图时不会请求接口。</Text>}
               <Pressable style={[styles.generate, generateDisabled && styles.disabled]} onPress={runGenerate} disabled={generateDisabled}>
                 <Text style={styles.generateText}>{!hydrated ? '正在恢复数据...' : generating ? '生成中...' : editBlocked ? '请先上传参考图' : '开始生成'}</Text>
