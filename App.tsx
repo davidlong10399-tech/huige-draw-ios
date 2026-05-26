@@ -30,9 +30,9 @@ const CONFIG_KEY = 'huige-draw-direct-config-v4';
 const LEGACY_CONFIG_KEY = 'huige-draw-direct-config-v3';
 const HISTORY_KEY = 'huige-draw-history-v3';
 const MAX_HISTORY = 50;
-const APP_VERSION = 'v0.2.7';
-const APP_BUILD_LABEL = '直连图片落地回滚修复版';
-const APP_BUILD_NUMBER = '20260526.7';
+const APP_VERSION = 'v0.2.8';
+const APP_BUILD_LABEL = 'iOS下载权限修复版';
+const APP_BUILD_NUMBER = '20260526.8';
 const stylesList = ['商业海报', '电影感', '真实摄影', '国潮', '产品摄影', '赛博朋克'];
 const stylePrompts: Record<string, string> = {
   商业海报: '商业海报设计，强视觉冲击，高级排版，真实光影',
@@ -53,21 +53,22 @@ async function makeUploadableRef(asset: { uri: string; fileName?: string | null;
 }
 
 async function materializeImageToJpeg(item: GenerateResult) {
-  if (!FileSystem.documentDirectory) throw new Error('本地文档目录不可用');
-  const dir = `${FileSystem.documentDirectory}huaren/`;
-  await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
+  const workDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+  if (!workDir) throw new Error('本地缓存目录不可用');
 
   let sourceUri = item.localUri || item.url;
   if (!sourceUri) throw new Error('图片地址为空');
 
+  // iOS 上 NSURLSession 下载文件移动到 Documents 子目录可能触发 NSCocoaErrorDomain 513。
+  // 所以这里不再创建 Documents/huaren 子目录，所有中间文件都放 cacheDirectory 根目录。
   if (sourceUri.startsWith('data:image/')) {
     const base64 = sourceUri.split(',')[1] || '';
     if (!base64) throw new Error('图片数据为空');
-    const tmpUri = `${dir}tmp-${item.id || makeId()}-${Date.now()}.png`;
+    const tmpUri = `${workDir}huaren-inline-${item.id || makeId()}-${Date.now()}.png`;
     await FileSystem.writeAsStringAsync(tmpUri, base64, { encoding: FileSystem.EncodingType.Base64 });
     sourceUri = tmpUri;
   } else if (/^https?:/i.test(sourceUri)) {
-    const tmpUri = `${dir}tmp-${item.id || makeId()}-${Date.now()}.img`;
+    const tmpUri = `${workDir}huaren-download-${item.id || makeId()}-${Date.now()}.png`;
     const downloaded = await FileSystem.downloadAsync(sourceUri, tmpUri);
     if (downloaded.status && downloaded.status >= 400) throw new Error(`图片下载失败 HTTP ${downloaded.status}`);
     sourceUri = downloaded.uri || tmpUri;
