@@ -43,6 +43,17 @@ const stylePrompts: Record<string, string> = {
 function sleep(ms: number) { return new Promise(resolve => setTimeout(resolve, ms)); }
 function makeId() { return `${Date.now()}-${Math.random().toString(16).slice(2)}`; }
 
+function arrayBufferToBase64(buffer: ArrayBuffer) {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
 async function makeUploadableRef(asset: { uri: string; fileName?: string | null; mimeType?: string | null }, index = 0): Promise<RefImage> {
   const converted = await ImageManipulator.manipulateAsync(asset.uri, [], { compress: 0.92, format: ImageManipulator.SaveFormat.JPEG });
   const baseName = asset.fileName?.replace(/\.[^.]+$/, '') || `ref-${Date.now()}-${index}`;
@@ -58,7 +69,11 @@ async function persistImage(result: GenerateResult) {
     const base64 = result.url.split(',')[1] || '';
     await FileSystem.writeAsStringAsync(localUri, base64, { encoding: FileSystem.EncodingType.Base64 });
   } else if (/^https?:/i.test(result.url)) {
-    await FileSystem.downloadAsync(result.url, localUri);
+    const response = await fetch(result.url);
+    if (!response.ok) throw new Error(`图片下载失败 HTTP ${response.status}`);
+    const buffer = await response.arrayBuffer();
+    const base64 = arrayBufferToBase64(buffer);
+    await FileSystem.writeAsStringAsync(localUri, base64, { encoding: FileSystem.EncodingType.Base64 });
   } else if (result.url.startsWith('file:')) {
     if (result.url !== localUri) await FileSystem.copyAsync({ from: result.url, to: localUri }).catch(() => {});
   } else {
