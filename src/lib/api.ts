@@ -416,11 +416,17 @@ export async function getImageTask(config: DirectApiConfig, id: string) {
   return json as ImageTask;
 }
 
+function normalizeTaskResult(result: GenerateResult, baseUrl: string): GenerateResult {
+  const url = normalizeImageUrl(result.url, baseUrl);
+  return { ...result, url };
+}
+
 export async function pollImageTask(config: DirectApiConfig, id: string, timeoutMs = 300000) {
+  const baseUrl = normalizeBaseUrl(config.apiBase);
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const task = await getImageTask(config, id);
-    if (task.status === 'succeeded' && task.result) return task.result;
+    if (task.status === 'succeeded' && task.result) return normalizeTaskResult(task.result, baseUrl);
     if (task.status === 'failed') throw new Error(task.error || '电脑服务器任务失败');
     await new Promise(resolve => setTimeout(resolve, 3000));
   }
