@@ -30,9 +30,9 @@ const CONFIG_KEY = 'huige-draw-direct-config-v4';
 const LEGACY_CONFIG_KEY = 'huige-draw-direct-config-v3';
 const HISTORY_KEY = 'huige-draw-history-v3';
 const MAX_HISTORY = 50;
-const APP_VERSION = 'v0.2.9';
-const APP_BUILD_LABEL = '旧本地路径清理版';
-const APP_BUILD_NUMBER = '20260526.9';
+const APP_VERSION = 'v0.3.0';
+const APP_BUILD_LABEL = '保存修改诊断版';
+const APP_BUILD_NUMBER = '20260526.10';
 const stylesList = ['商业海报', '电影感', '真实摄影', '国潮', '产品摄影', '赛博朋克'];
 const stylePrompts: Record<string, string> = {
   商业海报: '商业海报设计，强视觉冲击，高级排版，真实光影',
@@ -46,6 +46,39 @@ const stylePrompts: Record<string, string> = {
 function sleep(ms: number) { return new Promise(resolve => setTimeout(resolve, ms)); }
 function makeId() { return `${Date.now()}-${Math.random().toString(16).slice(2)}`; }
 
+function errorMessage(error: any) {
+  return error?.message || String(error);
+}
+
+function imageDebugDetails(step: string, item: GenerateResult, error: any, extra: Record<string, any> = {}) {
+  return JSON.stringify({
+    version: APP_VERSION,
+    build: APP_BUILD_NUMBER,
+    label: APP_BUILD_LABEL,
+    step,
+    error: errorMessage(error),
+    item: {
+      id: item?.id,
+      urlPrefix: typeof item?.url === 'string' ? item.url.slice(0, 160) : null,
+      localUri: item?.localUri || null,
+      prompt: item?.prompt || item?.revised_prompt || null,
+    },
+    dirs: {
+      cacheDirectory: FileSystem.cacheDirectory,
+      documentDirectory: FileSystem.documentDirectory,
+    },
+    extra,
+  }, null, 2);
+}
+
+async function alertImageError(title: string, step: string, item: GenerateResult, error: any, extra: Record<string, any> = {}) {
+  const details = imageDebugDetails(step, item, error, extra);
+  Alert.alert(title, errorMessage(error), [
+    { text: '复制错误详情', onPress: () => Clipboard.setStringAsync(details).catch(() => {}) },
+    { text: '知道了' },
+  ]);
+}
+
 async function makeUploadableRef(asset: { uri: string; fileName?: string | null; mimeType?: string | null }, index = 0): Promise<RefImage> {
   const converted = await ImageManipulator.manipulateAsync(asset.uri, [], { compress: 0.92, format: ImageManipulator.SaveFormat.JPEG });
   const baseName = asset.fileName?.replace(/\.[^.]+$/, '') || `ref-${Date.now()}-${index}`;
@@ -53,38 +86,58 @@ async function makeUploadableRef(asset: { uri: string; fileName?: string | null;
 }
 
 async function materializeImageToJpeg(item: GenerateResult) {
-  const workDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
-  if (!workDir) throw new Error('本地缓存目录不可用');
+  const debug: Record<string, any> = { phase: 'start' };
+  try {
+    const workDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+    debug.workDir = workDir;
+    if (!workDir) throw new Error('本地缓存目录不可用');
 
-  const badDocumentsPath = (value?: string) => !!value && /\/Documents\/huaren\//i.test(value);
-  let sourceUri = badDocumentsPath(item.localUri) ? item.url : (item.localUri || item.url);
-  if (!sourceUri) throw new Error('图片地址为空');
+    const badDocumentsPath = (value?: string) => !!value && /\/Documents\/huaren\//i.test(value);
+    debug.originalLocalUri = item.localUri || null;
+    debug.originalUrlPrefix = typeof item.url === 'string' ? item.url.slice(0, 180) : null;
+    debug.localUriIgnored = badDocumentsPath(item.localUri);
+    let sourceUri = badDocumentsPath(item.localUri) ? item.url : (item.localUri || item.url);
+    debug.chosenSourcePrefix = typeof sourceUri === 'string' ? sourceUri.slice(0, 180) : null;
+    if (!sourceUri) throw new Error('图片地址为空');
 
-  // iOS 上 NSURLSession 下载文件移动到 Documents 子目录可能触发 NSCocoaErrorDomain 513。
-  // 所以这里不再创建 Documents/huaren 子目录，所有中间文件都放 cacheDirectory 根目录。
-  if (sourceUri.startsWith('data:image/')) {
-    const base64 = sourceUri.split(',')[1] || '';
-    if (!base64) throw new Error('图片数据为空');
-    const tmpUri = `${workDir}huaren-inline-${item.id || makeId()}-${Date.now()}.png`;
-    await FileSystem.writeAsStringAsync(tmpUri, base64, { encoding: FileSystem.EncodingType.Base64 });
-    sourceUri = tmpUri;
-  } else if (/^https?:/i.test(sourceUri)) {
-    const tmpUri = `${workDir}huaren-download-${item.id || makeId()}-${Date.now()}.png`;
-    const downloaded = await FileSystem.downloadAsync(sourceUri, tmpUri);
-    if (downloaded.status && downloaded.status >= 400) throw new Error(`图片下载失败 HTTP ${downloaded.status}`);
-    sourceUri = downloaded.uri || tmpUri;
+    if (sourceUri.startsWith('data:image/')) {
+      debug.phase = 'write-data-url';
+      const base64 = sourceUri.split(',')[1] || '';
+      debug.base64Length = base64.length;
+      if (!base64) throw new Error('图片数据为空');
+      const tmpUri = `${workDir}huaren-inline-${item.id || makeId()}-${Date.now()}.png`;
+      debug.tmpUri = tmpUri;
+      await FileSystem.writeAsStringAsync(tmpUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+      sourceUri = tmpUri;
+    } else if (/^https?:/i.test(sourceUri)) {
+      debug.phase = 'download';
+      const tmpUri = `${workDir}huaren-download-${item.id || makeId()}-${Date.now()}.png`;
+      debug.tmpUri = tmpUri;
+      const downloaded = await FileSystem.downloadAsync(sourceUri, tmpUri);
+      debug.downloaded = downloaded;
+      if (downloaded.status && downloaded.status >= 400) throw new Error(`图片下载失败 HTTP ${downloaded.status}`);
+      sourceUri = downloaded.uri || tmpUri;
+    }
+
+    debug.phase = 'check-file';
+    debug.materializedSource = sourceUri;
+    if (!sourceUri.startsWith('file:')) throw new Error('无法将图片转成本地文件');
+    const info = await FileSystem.getInfoAsync(sourceUri);
+    debug.sourceInfo = info;
+    if (!info.exists) throw new Error('图片本地文件不存在');
+
+    debug.phase = 'normalize-jpeg';
+    const normalized = await ImageManipulator.manipulateAsync(
+      sourceUri,
+      [],
+      { compress: 0.96, format: ImageManipulator.SaveFormat.JPEG }
+    );
+    debug.normalized = normalized;
+    return normalized.uri;
+  } catch (error: any) {
+    (error as any).debugDetails = debug;
+    throw error;
   }
-
-  if (!sourceUri.startsWith('file:')) throw new Error('无法将图片转成本地文件');
-  const info = await FileSystem.getInfoAsync(sourceUri);
-  if (!info.exists) throw new Error('图片本地文件不存在');
-
-  const normalized = await ImageManipulator.manipulateAsync(
-    sourceUri,
-    [],
-    { compress: 0.96, format: ImageManipulator.SaveFormat.JPEG }
-  );
-  return normalized.uri;
 }
 
 async function persistImage(result: GenerateResult) {
@@ -297,7 +350,7 @@ export default function App() {
       await MediaLibrary.saveToLibraryAsync(uri);
       Alert.alert('已保存', '图片已保存到系统相册。');
     } catch (e: any) {
-      Alert.alert('保存失败', e.message || String(e));
+      await alertImageError('保存失败', 'saveToAlbum', item, e, e?.debugDetails || {});
     }
   }
 
@@ -310,7 +363,7 @@ export default function App() {
       setPrompt('在这张图基础上，');
       setSelected(null);
     } catch (e: any) {
-      Alert.alert('再次修改失败', e.message || String(e));
+      await alertImageError('再次修改失败', 'editAgain', item, e, e?.debugDetails || {});
     }
   }
 
