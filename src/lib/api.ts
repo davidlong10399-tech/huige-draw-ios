@@ -289,8 +289,13 @@ function isLocalTaskBase(baseUrl: string) {
   return /^https?:\/\/(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/i.test(baseUrl) || /^https?:\/\/[^/]+:8848/i.test(baseUrl);
 }
 
+function isCloudTaskBase(baseUrl: string) {
+  return /^https:\/\/huaren-worker[.-]/i.test(baseUrl) || /^https:\/\/[^/]+\.workers\.dev/i.test(baseUrl);
+}
+
 export function isTaskServer(config: DirectApiConfig) {
-  return isLocalTaskBase(normalizeBaseUrl(config.apiBase));
+  const baseUrl = normalizeBaseUrl(config.apiBase);
+  return isLocalTaskBase(baseUrl) || isCloudTaskBase(baseUrl);
 }
 
 function sizeValue(size: string) {
@@ -401,8 +406,15 @@ async function refToDataUrl(img: RefImage) {
 export async function submitImageTask(config: DirectApiConfig, payload: { mode: 'generate' | 'edit'; prompt: string; size: string; images?: RefImage[] }) {
   const baseUrl = normalizeBaseUrl(config.apiBase);
   const images = payload.mode === 'edit' ? await Promise.all((payload.images || []).map(refToDataUrl)) : undefined;
-  const data = await apiPost({ ...config, apiKey: '' }, '/api/tasks', { mode: payload.mode, prompt: payload.prompt, size: payload.size, images });
-  if (!data.id) throw new Error('电脑服务器未返回任务 ID');
+  const isCloudTask = isCloudTaskBase(baseUrl);
+  const body: Json = { mode: payload.mode, prompt: payload.prompt, size: payload.size, images };
+  if (isCloudTask) {
+    body.providerBase = 'https://api.sharehub.club';
+    body.providerKey = config.apiKey?.trim();
+    body.model = config.imageModel;
+  }
+  const data = await apiPost({ ...config, apiKey: '' }, '/api/tasks', body);
+  if (!data.id) throw new Error(isCloudTask ? '云端任务服务器未返回任务 ID' : '电脑服务器未返回任务 ID');
   return data as ImageTask;
 }
 
@@ -427,10 +439,10 @@ export async function pollImageTask(config: DirectApiConfig, id: string, timeout
   while (Date.now() - start < timeoutMs) {
     const task = await getImageTask(config, id);
     if (task.status === 'succeeded' && task.result) return normalizeTaskResult(task.result, baseUrl);
-    if (task.status === 'failed') throw new Error(task.error || '电脑服务器任务失败');
+    if (task.status === 'failed') throw new Error(task.error || '任务服务器任务失败');
     await new Promise(resolve => setTimeout(resolve, 3000));
   }
-  throw new Error('电脑服务器任务仍在生成中，请稍后回到作品页刷新');
+  throw new Error('任务服务器仍在生成中，请稍后回到作品页刷新');
 }
 
 export async function generateImage(config: DirectApiConfig, payload: { prompt: string; size: string }) {
