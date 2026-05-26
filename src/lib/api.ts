@@ -418,9 +418,22 @@ export async function submitImageTask(config: DirectApiConfig, payload: { mode: 
   return data as ImageTask;
 }
 
+async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs = 12000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error: any) {
+    if (error?.name === 'AbortError') throw new Error('任务服务器响应超时，请检查网络/VPN 后重试');
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function getImageTask(config: DirectApiConfig, id: string) {
   const baseUrl = normalizeBaseUrl(config.apiBase);
-  const res = await fetch(`${baseUrl}/api/tasks/${encodeURIComponent(id)}`);
+  const res = await fetchWithTimeout(`${baseUrl}/api/tasks/${encodeURIComponent(id)}`);
   const text = await res.text();
   let json: any = {};
   try { json = text ? JSON.parse(text) : {}; } catch { json = { raw: text }; }
@@ -435,14 +448,15 @@ function normalizeTaskResult(result: GenerateResult, baseUrl: string): GenerateR
 
 export async function pollImageTask(config: DirectApiConfig, id: string, timeoutMs = 300000) {
   const baseUrl = normalizeBaseUrl(config.apiBase);
+  const maxWait = isCloudTaskBase(baseUrl) ? Math.min(timeoutMs, 90000) : timeoutMs;
   const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
+  while (Date.now() - start < maxWait) {
     const task = await getImageTask(config, id);
     if (task.status === 'succeeded' && task.result) return normalizeTaskResult(task.result, baseUrl);
     if (task.status === 'failed') throw new Error(task.error || '任务服务器任务失败');
     await new Promise(resolve => setTimeout(resolve, 3000));
   }
-  throw new Error('任务服务器仍在生成中，请稍后回到作品页刷新');
+  throw new Error(isCloudTaskBase(baseUrl) ? '云端任务仍在生成中或已超时，请稍后重试；如果持续 504，说明免费 Worker 扛不住这次长生图。' : '任务服务器仍在生成中，请稍后回到作品页刷新');
 }
 
 export async function generateImage(config: DirectApiConfig, payload: { prompt: string; size: string }) {
