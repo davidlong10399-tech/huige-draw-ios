@@ -30,6 +30,9 @@ const CONFIG_KEY = 'huige-draw-direct-config-v4';
 const LEGACY_CONFIG_KEY = 'huige-draw-direct-config-v3';
 const HISTORY_KEY = 'huige-draw-history-v3';
 const MAX_HISTORY = 50;
+const APP_VERSION = 'v0.2.5';
+const APP_BUILD_LABEL = '云端任务超时修补版';
+const APP_BUILD_NUMBER = '20260526.5';
 const stylesList = ['商业海报', '电影感', '真实摄影', '国潮', '产品摄影', '赛博朋克'];
 const stylePrompts: Record<string, string> = {
   商业海报: '商业海报设计，强视觉冲击，高级排版，真实光影',
@@ -411,6 +414,11 @@ export default function App() {
           </View>}
 
           {tab === 'settings' && <>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>版本信息</Text>
+              <Text style={styles.sub}>{APP_VERSION} · {APP_BUILD_LABEL}</Text>
+              <Text style={styles.sub}>Build {APP_BUILD_NUMBER}</Text>
+            </View>
             <View style={styles.card}>
               <View style={styles.rowBetween}>
                 <View>
