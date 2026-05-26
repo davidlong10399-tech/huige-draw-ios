@@ -30,9 +30,9 @@ const CONFIG_KEY = 'huige-draw-direct-config-v4';
 const LEGACY_CONFIG_KEY = 'huige-draw-direct-config-v3';
 const HISTORY_KEY = 'huige-draw-history-v3';
 const MAX_HISTORY = 50;
-const APP_VERSION = 'v0.2.8';
-const APP_BUILD_LABEL = 'iOS下载权限修复版';
-const APP_BUILD_NUMBER = '20260526.8';
+const APP_VERSION = 'v0.2.9';
+const APP_BUILD_LABEL = '旧本地路径清理版';
+const APP_BUILD_NUMBER = '20260526.9';
 const stylesList = ['商业海报', '电影感', '真实摄影', '国潮', '产品摄影', '赛博朋克'];
 const stylePrompts: Record<string, string> = {
   商业海报: '商业海报设计，强视觉冲击，高级排版，真实光影',
@@ -56,7 +56,8 @@ async function materializeImageToJpeg(item: GenerateResult) {
   const workDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
   if (!workDir) throw new Error('本地缓存目录不可用');
 
-  let sourceUri = item.localUri || item.url;
+  const badDocumentsPath = (value?: string) => !!value && /\/Documents\/huaren\//i.test(value);
+  let sourceUri = badDocumentsPath(item.localUri) ? item.url : (item.localUri || item.url);
   if (!sourceUri) throw new Error('图片地址为空');
 
   // iOS 上 NSURLSession 下载文件移动到 Documents 子目录可能触发 NSCocoaErrorDomain 513。
@@ -302,10 +303,8 @@ export default function App() {
 
   async function editAgain(item: GenerateResult) {
     try {
-      const saved = item.localUri ? item : await persistImage(item);
-      const uri = saved.localUri || saved.url;
-      if (!uri.startsWith('file:')) throw new Error('无法把这张图转换成本地参考图文件');
-      setRefs([{ name: 'generated-reference.png', uri, mimeType: 'image/png' }]);
+      const uri = await materializeImageToJpeg(item);
+      setRefs([{ name: 'generated-reference.jpg', uri, mimeType: 'image/jpeg' }]);
       setMode('edit');
       setTab('create');
       setPrompt('在这张图基础上，');
