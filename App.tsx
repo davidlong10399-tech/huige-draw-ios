@@ -30,9 +30,9 @@ const CONFIG_KEY = 'huige-draw-direct-config-v4';
 const LEGACY_CONFIG_KEY = 'huige-draw-direct-config-v3';
 const HISTORY_KEY = 'huige-draw-history-v3';
 const MAX_HISTORY = 50;
-const APP_VERSION = 'v0.2.5';
-const APP_BUILD_LABEL = '云端任务超时修补版';
-const APP_BUILD_NUMBER = '20260526.5';
+const APP_VERSION = 'v0.2.6';
+const APP_BUILD_LABEL = '直连保存修改修复版';
+const APP_BUILD_NUMBER = '20260526.6';
 const stylesList = ['商业海报', '电影感', '真实摄影', '国潮', '产品摄影', '赛博朋克'];
 const stylePrompts: Record<string, string> = {
   商业海报: '商业海报设计，强视觉冲击，高级排版，真实光影',
@@ -52,23 +52,48 @@ async function makeUploadableRef(asset: { uri: string; fileName?: string | null;
   return { name: `${baseName}.jpg`, uri: converted.uri, mimeType: 'image/jpeg' };
 }
 
-async function persistImage(result: GenerateResult) {
-  if (!FileSystem.documentDirectory) return result;
+function imageExtensionFromUrl(url: string) {
+  const clean = String(url || '').split('?')[0].toLowerCase();
+  if (clean.endsWith('.jpg') || clean.endsWith('.jpeg')) return 'jpg';
+  if (clean.endsWith('.webp')) return 'webp';
+  return 'png';
+}
+
+async function ensureLocalImageFile(item: GenerateResult) {
+  if (!FileSystem.documentDirectory) throw new Error('本地文档目录不可用');
+  if (item.localUri?.startsWith('file:')) {
+    const info = await FileSystem.getInfoAsync(item.localUri);
+    if (info.exists) return item.localUri;
+  }
+  if (item.url?.startsWith('file:')) {
+    const info = await FileSystem.getInfoAsync(item.url);
+    if (info.exists) return item.url;
+  }
+
   const dir = `${FileSystem.documentDirectory}huaren/`;
   await FileSystem.makeDirectoryAsync(dir, { intermediates: true }).catch(() => {});
-  const filename = `${result.id || makeId()}.png`;
-  const localUri = `${dir}${filename}`;
-  if (result.url.startsWith('data:image/')) {
-    const base64 = result.url.split(',')[1] || '';
+  const ext = item.url?.startsWith('data:image/jpeg') ? 'jpg' : imageExtensionFromUrl(item.url || '');
+  const localUri = `${dir}${item.id || makeId()}-${Date.now()}.${ext}`;
+
+  if (item.url?.startsWith('data:image/')) {
+    const base64 = item.url.split(',')[1] || '';
+    if (!base64) throw new Error('图片数据为空，无法保存');
     await FileSystem.writeAsStringAsync(localUri, base64, { encoding: FileSystem.EncodingType.Base64 });
-  } else if (/^https?:/i.test(result.url)) {
-    await FileSystem.downloadAsync(result.url, localUri);
-  } else if (result.url.startsWith('file:')) {
-    if (result.url !== localUri) await FileSystem.copyAsync({ from: result.url, to: localUri }).catch(() => {});
+  } else if (/^https?:/i.test(item.url || '')) {
+    const downloaded = await FileSystem.downloadAsync(item.url, localUri);
+    if (downloaded.status && downloaded.status >= 400) throw new Error(`图片下载失败 HTTP ${downloaded.status}`);
   } else {
-    return result;
+    throw new Error('图片地址格式不支持，无法转成本地文件');
   }
-  return { ...result, localUri, url: localUri };
+
+  const info = await FileSystem.getInfoAsync(localUri);
+  if (!info.exists) throw new Error('图片本地化失败，文件不存在');
+  return localUri;
+}
+
+async function persistImage(result: GenerateResult) {
+  const localUri = await ensureLocalImageFile(result);
+  return { ...result, localUri };
 }
 
 async function filterExistingResults(items: GenerateResult[]) {
@@ -272,9 +297,8 @@ export default function App() {
     try {
       const perm = await MediaLibrary.requestPermissionsAsync();
       if (!perm.granted) return Alert.alert('需要相册权限', '请允许保存图片到相册。');
-      const uri = item.localUri || (await persistImage(item)).localUri;
-      if (!uri) throw new Error('图片文件不存在');
-      await MediaLibrary.saveToLibraryAsync(uri);
+      const uri = await ensureLocalImageFile(item);
+      await MediaLibrary.createAssetAsync(uri);
       Alert.alert('已保存', '图片已保存到系统相册。');
     } catch (e: any) {
       Alert.alert('保存失败', e.message || String(e));
