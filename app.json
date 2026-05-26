@@ -19,10 +19,17 @@
         "NSCameraUsageDescription": "用于拍摄参考图。",
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true,
+          "NSAllowsLocalNetworking": true,
           "NSExceptionDomains": {
+            "192.168.2.101": {
+              "NSExceptionAllowsInsecureHTTPLoads": true,
+              "NSIncludesSubdomains": true,
+              "NSTemporaryExceptionAllowsInsecureHTTPLoads": true
+            },
             "192.168.2.104": {
               "NSExceptionAllowsInsecureHTTPLoads": true,
-              "NSIncludesSubdomains": true
+              "NSIncludesSubdomains": true,
+              "NSTemporaryExceptionAllowsInsecureHTTPLoads": true
             }
           }
         }
