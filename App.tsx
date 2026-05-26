@@ -190,13 +190,35 @@ export default function App() {
     }, 900);
   }
 
+  function stopProgress(label = '') {
+    if (progressTimer.current) {
+      clearInterval(progressTimer.current);
+      progressTimer.current = null;
+    }
+    setProgress(0);
+    setProgressText(label);
+  }
+
+  function friendlyErrorMessage(error: any) {
+    const message = error?.message || String(error);
+    if (/504|timeout|timed out|Gateway Timeout/i.test(message)) {
+      return '服务商超时（504）。这不是 App 卡住，请稍后重试或切换中转站/模型。';
+    }
+    if (/Network request failed/i.test(message)) {
+      return '网络请求失败。请保持前台/网络稳定后重试。';
+    }
+    return message;
+  }
+
   async function finishProgress(label: string) {
-    if (progressTimer.current) clearInterval(progressTimer.current);
+    if (progressTimer.current) {
+      clearInterval(progressTimer.current);
+      progressTimer.current = null;
+    }
     setProgressText(label);
     setProgress(1);
     await sleep(450);
-    setProgress(0);
-    setProgressText('');
+    stopProgress('');
   }
 
   const checkHealth = useCallback(async () => {
@@ -237,8 +259,8 @@ export default function App() {
       setPrompt(r.optimized);
       await finishProgress('优化完成');
     } catch (e: any) {
-      setProgress(0);
-      Alert.alert('优化失败', e.message || String(e));
+      stopProgress('优化失败');
+      Alert.alert('优化失败', friendlyErrorMessage(e));
     } finally {
       setOptimizing(false);
     }
@@ -272,8 +294,8 @@ export default function App() {
       await finishProgress('生成完成');
       setSelected(saved);
     } catch (e: any) {
-      setProgress(0);
-      Alert.alert('生成失败', e.message || String(e));
+      stopProgress('生成失败');
+      Alert.alert('生成失败', friendlyErrorMessage(e));
     } finally {
       setGenerating(false);
     }
@@ -394,7 +416,7 @@ export default function App() {
                 <Text style={styles.uploadSub}>{refs.length ? '点缩略图可移除单张参考图' : '最多 4 张，用于以图改图'}</Text>
               </Pressable>
               {!!refs.length && <View style={styles.refRow}>{refs.map((r, i) => <Pressable key={i} onPress={() => setRefs(refs.filter((_, idx) => idx !== i))}><Image source={{ uri: r.uri }} style={styles.refImg} /></Pressable>)}</View>}
-              {!!progress && <View style={styles.progressWrap}><View style={[styles.progressBar, { width: `${Math.round(progress * 100)}%` }]} /><Text style={styles.progressText}>{progressText} · {Math.round(progress * 100)}% · 保持屏幕常亮</Text></View>}
+              {(!!progress || !!progressText) && <View style={styles.progressWrap}><View style={[styles.progressBar, { width: `${Math.round(progress * 100)}%` }]} /><Text style={styles.progressText}>{progress ? `${progressText} · ${Math.round(progress * 100)}% · 保持屏幕常亮` : progressText}</Text></View>}
               {editBlocked && <Text style={styles.warnText}>以图改图需要先上传参考图；没有参考图时不会请求接口。</Text>}
               <Pressable style={[styles.generate, generateDisabled && styles.disabled]} onPress={runGenerate} disabled={generateDisabled}>
                 <Text style={styles.generateText}>{!hydrated ? '正在恢复数据...' : generating ? '生成中...' : editBlocked ? '请先上传参考图' : '开始生成'}</Text>
