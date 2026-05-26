@@ -2,7 +2,7 @@
   "expo": {
     "name": "画刃",
     "slug": "huaren",
-    "version": "0.3.0",
+    "version": "0.2.10",
     "orientation": "portrait",
     "scheme": "huaren",
     "userInterfaceStyle": "light",
@@ -19,32 +19,25 @@
         "NSCameraUsageDescription": "用于拍摄参考图。",
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true,
-          "NSAllowsLocalNetworking": true,
           "NSExceptionDomains": {
-            "192.168.2.101": {
-              "NSExceptionAllowsInsecureHTTPLoads": true,
-              "NSIncludesSubdomains": true,
-              "NSTemporaryExceptionAllowsInsecureHTTPLoads": true
-            },
             "192.168.2.104": {
               "NSExceptionAllowsInsecureHTTPLoads": true,
-              "NSIncludesSubdomains": true,
-              "NSTemporaryExceptionAllowsInsecureHTTPLoads": true
+              "NSIncludesSubdomains": true
             }
           }
         }
       },
       "icon": "./assets/icon.png",
-      "buildNumber": "20260526.10"
+      "buildNumber": "20260526.11"
     },
     "extra": {
       "defaultApiBase": "https://pucoding.com",
       "eas": {
         "projectId": "22b8fa83-0b79-436f-a751-e3cd58a1a064"
       },
-      "appVersion": "0.3.0",
-      "buildNumber": "20260526.10",
-      "buildLabel": "保存修改诊断版"
+      "appVersion": "0.2.10",
+      "buildNumber": "20260526.11",
+      "buildLabel": "9cc基线保存最小修复版"
     },
     "icon": "./assets/icon.png",
     "splash": {

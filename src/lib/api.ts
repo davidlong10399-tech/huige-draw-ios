@@ -1,5 +1,3 @@
-import * as FileSystem from 'expo-file-system/legacy';
-
 export const DEFAULT_API_BASE = 'https://pucoding.com';
 export const DEFAULT_IMAGE_MODEL = 'gpt-image-2';
 export const DEFAULT_ASSISTANT_MODEL = 'claude-sonnet-4-6';
@@ -11,7 +9,7 @@ export type RefImage = { name: string; uri: string; mimeType?: string };
 
 type Json = Record<string, any>;
 
-export function normalizeBaseUrl(input: string) {
+function normalizeBaseUrl(input: string) {
   return String(input || '').trim().replace(/\/v1\/?$/, '').replace(/\/$/, '');
 }
 
@@ -285,19 +283,6 @@ function normalizeImageUrl(url: string, baseUrl: string) {
   return url;
 }
 
-function isLocalTaskBase(baseUrl: string) {
-  return /^https?:\/\/(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/i.test(baseUrl) || /^https?:\/\/[^/]+:8848/i.test(baseUrl);
-}
-
-function isCloudTaskBase(baseUrl: string) {
-  return /^https:\/\/huaren-worker[.-]/i.test(baseUrl) || /^https:\/\/[^/]+\.workers\.dev/i.test(baseUrl);
-}
-
-export function isTaskServer(config: DirectApiConfig) {
-  const baseUrl = normalizeBaseUrl(config.apiBase);
-  return isLocalTaskBase(baseUrl) || isCloudTaskBase(baseUrl);
-}
-
 function sizeValue(size: string) {
   return size === '16:9' ? '1792x1024' : size === '9:16' ? '1024x1792' : '1024x1024';
 }
@@ -395,75 +380,7 @@ export async function askAssistant(config: DirectApiConfig, payload: { prompt: s
   return { message, chips, model: config.assistantModel };
 }
 
-export type ImageTask = { id: string; status: 'queued' | 'running' | 'succeeded' | 'failed'; mode: 'generate' | 'edit'; error?: string | null; result?: GenerateResult | null };
-
-async function refToDataUrl(img: RefImage) {
-  if (img.uri.startsWith('data:image/')) return img.uri;
-  const base64 = await FileSystem.readAsStringAsync(img.uri, { encoding: FileSystem.EncodingType.Base64 });
-  return `data:${img.mimeType || 'image/png'};base64,${base64}`;
-}
-
-export async function submitImageTask(config: DirectApiConfig, payload: { mode: 'generate' | 'edit'; prompt: string; size: string; images?: RefImage[] }) {
-  const baseUrl = normalizeBaseUrl(config.apiBase);
-  const images = payload.mode === 'edit' ? await Promise.all((payload.images || []).map(refToDataUrl)) : undefined;
-  const isCloudTask = isCloudTaskBase(baseUrl);
-  const body: Json = { mode: payload.mode, prompt: payload.prompt, size: payload.size, images };
-  if (isCloudTask) {
-    body.providerBase = 'https://api.sharehub.club';
-    body.providerKey = config.apiKey?.trim();
-    body.model = config.imageModel;
-  }
-  const data = await apiPost({ ...config, apiKey: '' }, '/api/tasks', body);
-  if (!data.id) throw new Error(isCloudTask ? '云端任务服务器未返回任务 ID' : '电脑服务器未返回任务 ID');
-  return data as ImageTask;
-}
-
-async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs = 12000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } catch (error: any) {
-    if (error?.name === 'AbortError') throw new Error('任务服务器响应超时，请检查网络/VPN 后重试');
-    throw error;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-export async function getImageTask(config: DirectApiConfig, id: string) {
-  const baseUrl = normalizeBaseUrl(config.apiBase);
-  const res = await fetchWithTimeout(`${baseUrl}/api/tasks/${encodeURIComponent(id)}`);
-  const text = await res.text();
-  let json: any = {};
-  try { json = text ? JSON.parse(text) : {}; } catch { json = { raw: text }; }
-  if (!res.ok || json.error) throw new Error(json.error?.message || json.error || json.raw || `HTTP ${res.status}`);
-  return json as ImageTask;
-}
-
-function normalizeTaskResult(result: GenerateResult, baseUrl: string): GenerateResult {
-  const url = normalizeImageUrl(result.url, baseUrl);
-  return { ...result, url };
-}
-
-export async function pollImageTask(config: DirectApiConfig, id: string, timeoutMs = 300000) {
-  const baseUrl = normalizeBaseUrl(config.apiBase);
-  const maxWait = isCloudTaskBase(baseUrl) ? Math.min(timeoutMs, 90000) : timeoutMs;
-  const start = Date.now();
-  while (Date.now() - start < maxWait) {
-    const task = await getImageTask(config, id);
-    if (task.status === 'succeeded' && task.result) return normalizeTaskResult(task.result, baseUrl);
-    if (task.status === 'failed') throw new Error(task.error || '任务服务器任务失败');
-    await new Promise(resolve => setTimeout(resolve, 3000));
-  }
-  throw new Error(isCloudTaskBase(baseUrl) ? '云端任务仍在生成中或已超时，请稍后重试；如果持续 504，说明免费 Worker 扛不住这次长生图。' : '任务服务器仍在生成中，请稍后回到作品页刷新');
-}
-
 export async function generateImage(config: DirectApiConfig, payload: { prompt: string; size: string }) {
-  if (isTaskServer(config)) {
-    const task = await submitImageTask(config, { mode: 'generate', prompt: payload.prompt, size: payload.size });
-    return pollImageTask(config, task.id);
-  }
   const baseUrl = normalizeBaseUrl(config.apiBase);
   const attempts = [
     { path: '/v1/images/generations', body: { model: config.imageModel, prompt: payload.prompt, n: 1, size: sizeValue(payload.size), response_format: 'b64_json' } },
@@ -485,10 +402,6 @@ export async function generateImage(config: DirectApiConfig, payload: { prompt: 
 
 export async function editImage(config: DirectApiConfig, payload: { prompt: string; size: string; images: RefImage[] }) {
   if (!payload.images?.length) throw new Error('参考图编辑需要先上传图片');
-  if (isTaskServer(config)) {
-    const task = await submitImageTask(config, { mode: 'edit', prompt: payload.prompt, size: payload.size, images: payload.images });
-    return pollImageTask(config, task.id);
-  }
   const baseUrl = normalizeBaseUrl(config.apiBase);
   let lastErr = '';
   for (const ep of ['/v1/images/edits', '/v1/images/edit']) {
@@ -542,14 +455,6 @@ export async function optimizePrompt(config: DirectApiConfig, prompt: string) {
 
 export async function health(config: DirectApiConfig) {
   const baseUrl = normalizeBaseUrl(config.apiBase);
-  if (isLocalTaskBase(baseUrl)) {
-    const res = await fetch(`${baseUrl}/api/health`);
-    const text = await res.text();
-    let json: any = {};
-    try { json = text ? JSON.parse(text) : {}; } catch { json = { raw: text }; }
-    if (!res.ok || json.error) throw new Error(json.error?.message || json.error || json.raw || `HTTP ${res.status}`);
-    return { ok: true, baseUrl, imageModel: json.imageModel || config.imageModel, optimizerModel: json.optimizerModel || config.assistantModel, raw: json };
-  }
   const attempts = [
     '/v1/health',
     '/v1/models',
