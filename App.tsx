@@ -447,39 +447,51 @@ export default function App() {
           </View>}
 
           {tab === 'settings' && <>
-            <View style={styles.card}>
+            <View style={styles.settingsSummary}>
               <View style={styles.rowBetween}>
-                <View>
-                  <Text style={styles.cardTitle}>生图供应商</Text>
-                  <Text style={styles.sub}>用于文生图和以图改图 · Key：{maskedImageKey}</Text>
+                <View style={styles.summaryCopy}>
+                  <Text style={styles.cardTitle}>接口配置</Text>
+                  <Text style={styles.sub}>生图与提示词优化分开计费，文本模型建议用低价 fast/mini。</Text>
                 </View>
-                <Pressable style={styles.smallButton} onPress={checkHealth}><Text style={styles.smallButtonText}>测试</Text></Pressable>
+                <Pressable style={styles.smallButton} onPress={checkHealth}><Text style={styles.smallButtonText}>测试生图</Text></Pressable>
               </View>
-              <View style={styles.presetRow}>
-                <Pressable style={styles.presetButton} onPress={() => setImageApiBase('https://api.sharehub.club')}><Text style={styles.presetText}>ShareHub</Text></Pressable>
-                <Pressable style={styles.presetButton} onPress={() => setImageApiBase('https://pucoding.com')}><Text style={styles.presetText}>PuCoding</Text></Pressable>
+              <View style={styles.statusGrid}>
+                <View style={styles.statusCell}><Text style={styles.statusLabel}>生图</Text><Text style={styles.statusValue}>{imageModel || '未填写'}</Text><Text style={styles.statusMeta}>{maskedImageKey}</Text></View>
+                <View style={styles.statusCell}><Text style={styles.statusLabel}>文本</Text><Text style={styles.statusValue}>{textModel || '未填写'}</Text><Text style={styles.statusMeta}>{maskedTextKey}</Text></View>
               </View>
-              <Text style={styles.label}>API Base URL</Text>
-              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} value={imageApiBase} onChangeText={setImageApiBase} placeholder="https://api.sharehub.club" placeholderTextColor="#927c66" />
-              <Text style={styles.label}>API Key</Text>
-              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} secureTextEntry value={imageApiKey} onChangeText={setImageApiKey} placeholder="sk-image..." placeholderTextColor="#927c66" />
-              <Text style={styles.label}>生图模型</Text>
-              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} value={imageModel} onChangeText={setImageModel} placeholder="gpt-image-2" placeholderTextColor="#927c66" />
+              <Text style={styles.connectedText}>{connected}</Text>
             </View>
 
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>提示词优化供应商</Text>
-              <Text style={styles.sub}>用于 AI 优化提示词 · Key：{maskedTextKey}</Text>
-              <View style={styles.presetRow}>
-                <Pressable style={styles.presetButton} onPress={() => setTextApiBase('https://api.sharehub.club')}><Text style={styles.presetText}>ShareHub</Text></Pressable>
-                <Pressable style={styles.presetButton} onPress={() => setTextApiBase('https://pucoding.com')}><Text style={styles.presetText}>PuCoding</Text></Pressable>
+            <View style={styles.settingsGroup}>
+              <View style={styles.compactHeader}>
+                <View>
+                  <Text style={styles.compactTitle}>生图接口</Text>
+                  <Text style={styles.compactSub}>文生图 / 以图改图</Text>
+                </View>
+                <View style={styles.presetInline}>
+                  <Pressable style={styles.presetMini} onPress={() => setImageApiBase('https://api.sharehub.club')}><Text style={styles.presetText}>ShareHub</Text></Pressable>
+                  <Pressable style={styles.presetMini} onPress={() => setImageApiBase('https://pucoding.com')}><Text style={styles.presetText}>PuCoding</Text></Pressable>
+                </View>
               </View>
-              <Text style={styles.label}>API Base URL</Text>
-              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} value={textApiBase} onChangeText={setTextApiBase} placeholder="https://api.sharehub.club" placeholderTextColor="#927c66" />
-              <Text style={styles.label}>API Key</Text>
-              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} secureTextEntry value={textApiKey} onChangeText={setTextApiKey} placeholder="sk-text..." placeholderTextColor="#927c66" />
-              <Text style={styles.label}>文本模型</Text>
-              <TextInput style={styles.singleInput} autoCapitalize="none" autoCorrect={false} value={textModel} onChangeText={setTextModel} placeholder="claude-sonnet-4-6" placeholderTextColor="#927c66" />
+              <View style={styles.compactField}><Text style={styles.compactLabel}>Base</Text><TextInput style={styles.compactInput} autoCapitalize="none" autoCorrect={false} value={imageApiBase} onChangeText={setImageApiBase} placeholder="https://api.sharehub.club" placeholderTextColor="#927c66" /></View>
+              <View style={styles.compactField}><Text style={styles.compactLabel}>Key</Text><TextInput style={styles.compactInput} autoCapitalize="none" autoCorrect={false} secureTextEntry value={imageApiKey} onChangeText={setImageApiKey} placeholder="sk-image..." placeholderTextColor="#927c66" /></View>
+              <View style={styles.compactField}><Text style={styles.compactLabel}>Model</Text><TextInput style={styles.compactInput} autoCapitalize="none" autoCorrect={false} value={imageModel} onChangeText={setImageModel} placeholder="gpt-image-2" placeholderTextColor="#927c66" /></View>
+            </View>
+
+            <View style={styles.settingsGroup}>
+              <View style={styles.compactHeader}>
+                <View>
+                  <Text style={styles.compactTitle}>文本接口</Text>
+                  <Text style={styles.compactSub}>AI 提示词优化</Text>
+                </View>
+                <View style={styles.presetInline}>
+                  <Pressable style={styles.presetMini} onPress={() => setTextApiBase('https://api.sharehub.club')}><Text style={styles.presetText}>ShareHub</Text></Pressable>
+                  <Pressable style={styles.presetMini} onPress={() => setTextApiBase('https://pucoding.com')}><Text style={styles.presetText}>PuCoding</Text></Pressable>
+                </View>
+              </View>
+              <View style={styles.compactField}><Text style={styles.compactLabel}>Base</Text><TextInput style={styles.compactInput} autoCapitalize="none" autoCorrect={false} value={textApiBase} onChangeText={setTextApiBase} placeholder="https://api.sharehub.club" placeholderTextColor="#927c66" /></View>
+              <View style={styles.compactField}><Text style={styles.compactLabel}>Key</Text><TextInput style={styles.compactInput} autoCapitalize="none" autoCorrect={false} secureTextEntry value={textApiKey} onChangeText={setTextApiKey} placeholder="sk-text..." placeholderTextColor="#927c66" /></View>
+              <View style={styles.compactField}><Text style={styles.compactLabel}>Model</Text><TextInput style={styles.compactInput} autoCapitalize="none" autoCorrect={false} value={textModel} onChangeText={setTextModel} placeholder="gpt-4o-mini" placeholderTextColor="#927c66" /></View>
             </View>
           </>}
         </ScrollView>
@@ -593,6 +605,23 @@ const styles = StyleSheet.create({
   presetRow: { flexDirection: 'row', gap: 8, marginTop: 14 },
   presetButton: { borderWidth: 1, borderColor: '#2a313d', backgroundColor: '#0f141c', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
   presetText: { color: '#d4deef', fontSize: 12, fontWeight: '900' },
+  settingsSummary: { backgroundColor: '#121721', borderWidth: 1, borderColor: '#222a36', borderRadius: 18, padding: 14, marginBottom: 10 },
+  summaryCopy: { flex: 1 },
+  statusGrid: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  statusCell: { flex: 1, borderWidth: 1, borderColor: '#243043', backgroundColor: '#0f141c', borderRadius: 14, paddingHorizontal: 10, paddingVertical: 9 },
+  statusLabel: { color: '#8a94a6', fontSize: 11, fontWeight: '800' },
+  statusValue: { color: '#f5f7fb', fontSize: 12, fontWeight: '900', marginTop: 4 },
+  statusMeta: { color: '#8a94a6', fontSize: 11, marginTop: 3 },
+  connectedText: { color: '#c2cad6', fontSize: 12, marginTop: 10, lineHeight: 16 },
+  settingsGroup: { backgroundColor: '#121721', borderWidth: 1, borderColor: '#222a36', borderRadius: 18, padding: 12, marginBottom: 10 },
+  compactHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 8 },
+  compactTitle: { color: '#f5f7fb', fontSize: 15, fontWeight: '900' },
+  compactSub: { color: '#8a94a6', fontSize: 11, marginTop: 2 },
+  presetInline: { flexDirection: 'row', gap: 6, flexShrink: 0 },
+  presetMini: { borderWidth: 1, borderColor: '#2a313d', backgroundColor: '#0f141c', borderRadius: 999, paddingHorizontal: 9, paddingVertical: 6 },
+  compactField: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 7 },
+  compactLabel: { width: 48, color: '#c2cad6', fontSize: 12, fontWeight: '900' },
+  compactInput: { flex: 1, minHeight: 40, borderWidth: 1, borderColor: '#2a313d', borderRadius: 12, paddingHorizontal: 10, backgroundColor: '#0f141c', color: '#f5f7fb', fontSize: 14 },
   smallButtonText: { color: '#d4deef', fontSize: 12, fontWeight: '900' },
   emptyText: { color: '#8a94a6', fontSize: 13, marginTop: 18, lineHeight: 20 },
   tabBar: { flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingTop: 10, paddingBottom: Platform.OS === 'ios' ? 18 : 12, backgroundColor: '#0d0f14', borderTopWidth: 1, borderTopColor: '#222a36' },
