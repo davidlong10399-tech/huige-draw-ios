@@ -8,6 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar';
 import { useKeepAwake } from 'expo-keep-awake';
 import * as Clipboard from 'expo-clipboard';
+import { Ionicons } from '@expo/vector-icons';
 import { editImage, generateImage, health, DEFAULT_API_BASE, DEFAULT_ASSISTANT_MODEL, DEFAULT_IMAGE_MODEL, DirectApiConfig, GenerateResult, optimizePrompt, RefImage } from './src/lib/api';
 
 type Mode = 'generate' | 'edit';
@@ -20,7 +21,6 @@ type SavedConfig = {
   textApiKey?: string;
   textModel?: string;
   showSettings?: boolean;
-  // backward compatibility with v3
   apiBase?: string;
   apiKey?: string;
   assistantModel?: string;
@@ -111,6 +111,9 @@ export default function App() {
   const [textApiKey, setTextApiKey] = useState('');
   const [textModel, setTextModel] = useState(DEFAULT_ASSISTANT_MODEL);
   const [showSettings, setShowSettings] = useState(false);
+  const [expandedImageSettings, setExpandedImageSettings] = useState(false);
+  const [expandedTextSettings, setExpandedTextSettings] = useState(false);
+  const settingsLayoutInitialized = useRef(false);
   const [tab, setTab] = useState<Tab>('create');
   const [connected, setConnected] = useState('请填写 API Key 后测试连接');
   const [mode, setMode] = useState<Mode>('generate');
@@ -134,6 +137,8 @@ export default function App() {
   const editBlocked = mode === 'edit' && refs.length === 0;
   const generateDisabled = generating || optimizing || editBlocked || !hydrated;
   const activeTask = generating || optimizing;
+  const imageConfigured = !!imageApiBase.trim() && !!imageApiKey.trim() && !!imageModel.trim();
+  const textConfigured = !!textApiBase.trim() && !!textApiKey.trim() && !!textModel.trim();
   useKeepAwake(activeTask ? 'huaren-active-task' : undefined);
 
   useEffect(() => {
@@ -166,6 +171,13 @@ export default function App() {
     })();
     return () => { alive = false; };
   }, []);
+
+  useEffect(() => {
+    if (!hydrated || settingsLayoutInitialized.current) return;
+    settingsLayoutInitialized.current = true;
+    setExpandedImageSettings(!imageConfigured);
+    setExpandedTextSettings(!textConfigured);
+  }, [hydrated, imageConfigured, textConfigured]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -202,7 +214,7 @@ export default function App() {
   function friendlyErrorMessage(error: any) {
     const message = error?.message || String(error);
     if (/504|timeout|timed out|Gateway Timeout/i.test(message)) {
-      return '服务商超时（504）。这不是 App 卡住，请稍后重试或切换中转站/模型。';
+      return '服务商超时(504)。这不是 App 卡住，请稍后重试或切换中转站/模型。';
     }
     if (/Network request failed/i.test(message)) {
       return '网络请求失败。请保持前台/网络稳定后重试。';
@@ -231,7 +243,7 @@ export default function App() {
       const h = await health(imageConfig);
       setConnected(`生图接口正常 · ${h.imageModel || imageModel}`);
     } catch (e: any) {
-      setConnected(`生图连接失败：${e.message}`);
+      setConnected(`生图连接失败: ${e.message}`);
     }
   }, [imageApiKey, imageConfig, imageModel]);
 
@@ -269,7 +281,7 @@ export default function App() {
   async function runGenerate() {
     if (!imageApiKey.trim()) return Alert.alert('缺少生图 API Key', '请先在设置里填写生图 API Key。');
     if (!fullPrompt.trim()) return Alert.alert('先输入提示词');
-    if (mode === 'edit' && !refs.length) return Alert.alert('缺少参考图', '以图改图必须先上传参考图。请先点“上传参考图”，或切回“文生图”。');
+    if (mode === 'edit' && !refs.length) return Alert.alert('缺少参考图', '以图改图必须先上传参考图。请先点"上传参考图"，或切回"文生图"。');
     setGenerating(true);
     startProgress(mode === 'edit' ? '正在以图改图' : '正在生成图片');
     try {
@@ -337,7 +349,7 @@ export default function App() {
   }
 
   function clearHistory() {
-    Alert.alert('清空历史？', '会清空 App 内作品流记录，不删除系统相册。', [
+    Alert.alert('清空历史', '会清空 App 内作品流记录，不删除系统相册。', [
       { text: '取消' },
       { text: '清空', style: 'destructive', onPress: () => setResults([]) },
     ]);
@@ -347,182 +359,297 @@ export default function App() {
     <SafeAreaView style={styles.safe}>
       <StatusBar style="light" />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView style={styles.flex} contentContainerStyle={styles.content}>
+        <ScrollView style={styles.flex} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          {/* ── Header ── */}
           <View style={styles.header}>
-            <View style={styles.logo}><Text style={styles.logoText}>刃</Text></View>
-            <View style={styles.flex}>
-              <View style={styles.headerTopRow}>
-                <Text style={styles.title}>画刃</Text>
-                <View style={styles.badge}><Text style={styles.badgeText}>{tab === 'create' ? '创作' : tab === 'gallery' ? '作品' : '设置'}</Text></View>
-              </View>
-              <Text style={styles.sub}>{hydrated ? connected : '正在恢复本地配置与作品流...'}</Text>
+            <View style={styles.logo}>
+              <Ionicons name="flash" size={26} color="#0a0a0f" />
             </View>
+            <View style={styles.flex}>
+              <Text style={styles.title}>画刃</Text>
+              <Text style={styles.sub}>AI 出图工作台</Text>
+            </View>
+            <View style={[styles.statusDot, imageConfigured ? styles.statusDotOk : styles.statusDotOff]} />
           </View>
 
-          {tab === 'create' && <>
-            <View style={styles.hero}>
-              <View style={styles.rowBetween}>
-                <View style={styles.flex}>
-                  <Text style={styles.heroEyebrow}>AI Studio 工作台</Text>
-                  <Text style={styles.heroTitle}>输入提示词，选参考图，直接出图。</Text>
-                </View>
-                <View style={styles.badge}>
-                  <Text style={styles.badgeText}>{mode === 'generate' ? '文生图' : '以图改图'}</Text>
-                </View>
-              </View>
-              <View style={styles.statsRow}>
-                <View style={styles.statPill}><Text style={styles.statLabel}>参考图</Text><Text style={styles.statValue}>{refs.length}/4</Text></View>
-                <View style={styles.statPill}><Text style={styles.statLabel}>作品</Text><Text style={styles.statValue}>{results.length}</Text></View>
-                <View style={styles.statPill}><Text style={styles.statLabel}>状态</Text><Text style={styles.statValue}>{activeTask ? '常亮中' : '待命'}</Text></View>
-              </View>
-            </View>
-
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>创作面板</Text>
-              <View style={styles.segment}>
-                {(['generate', 'edit'] as Mode[]).map(m => (
-                  <Pressable key={m} style={[styles.segmentItem, mode === m && styles.segmentActive]} onPress={() => setMode(m)}>
-                    <Text style={mode === m ? styles.segmentTextActive : styles.segmentText}>{m === 'generate' ? '文生图' : '以图改图'}</Text>
-                  </Pressable>
-                ))}
-              </View>
-              <TextInput style={styles.inputCompact} multiline placeholder="输入你想生成的画面" placeholderTextColor="#927c66" value={prompt} onChangeText={setPrompt} />
-              <View style={styles.inlineActionRow}>
-                <Pressable style={[styles.inlineAction, optimizing && styles.disabled]} onPress={runOptimize} disabled={optimizing || !hydrated}>
-                  <Text style={styles.inlineActionText}>{optimizing ? '优化中...' : '优化'}</Text>
+          {/* ═══════ CREATE TAB ═══════ */}
+          {tab === 'create' && (<>
+            {/* Mode toggle card */}
+            <View style={styles.glassCard}>
+              <View style={styles.modeRow}>
+                <Pressable style={[styles.modeBtn, mode === 'generate' && styles.modeBtnActive]} onPress={() => setMode('generate')}>
+                  <Ionicons name="color-wand-outline" size={18} color={mode === 'generate' ? '#0a0a0f' : '#8e8e9a'} />
+                  <Text style={mode === 'generate' ? styles.modeBtnTextActive : styles.modeBtnText}>文生图</Text>
                 </Pressable>
-                <Pressable style={styles.inlineGhost} onPress={() => setPrompt('')} disabled={optimizing || generating}>
+                <Pressable style={[styles.modeBtn, mode === 'edit' && styles.modeBtnActive]} onPress={() => setMode('edit')}>
+                  <Ionicons name="images-outline" size={18} color={mode === 'edit' ? '#0a0a0f' : '#8e8e9a'} />
+                  <Text style={mode === 'edit' ? styles.modeBtnTextActive : styles.modeBtnText}>以图改图</Text>
+                </Pressable>
+              </View>
+
+              {/* BIG prompt */}
+              <TextInput
+                style={styles.promptInput}
+                multiline
+                placeholder="描述你想生成的画面..."
+                placeholderTextColor="#5e5e6a"
+                value={prompt}
+                onChangeText={setPrompt}
+                editable={!generating && !optimizing}
+              />
+
+              {/* Optimize + Clear */}
+              <View style={styles.inlineActions}>
+                <Pressable style={[styles.inlineAction, optimizing && styles.disabled]} onPress={runOptimize} disabled={optimizing}>
+                  <Ionicons name="sparkles" size={16} color="#0a0a0f" />
+                  <Text style={styles.inlineActionText}>{optimizing ? '优化中...' : 'AI 优化提示词'}</Text>
+                </Pressable>
+                <Pressable style={styles.inlineGhost} onPress={() => setPrompt('')}>
                   <Text style={styles.inlineGhostText}>清空</Text>
                 </Pressable>
               </View>
-              <Text style={styles.label}>比例</Text>
+            </View>
+
+            {/* Params card */}
+            <View style={styles.glassCard}>
+              <Text style={styles.sectionTitle}>比例</Text>
               <View style={styles.chips}>
                 {['1:1', '9:16', '16:9'].map(s => (
                   <Pressable key={s} style={[styles.chip, size === s && styles.chipActive]} onPress={() => setSize(s)}>
-                    <Text style={size === s ? styles.chipActiveText : styles.chipText}>{s}</Text>
+                    <Text style={size === s ? styles.chipTextActive : styles.chipText}>{s}</Text>
                   </Pressable>
                 ))}
               </View>
-              <Text style={styles.label}>风格</Text>
+
+              <Text style={styles.sectionTitle}>风格</Text>
               <View style={styles.chips}>
                 {stylesList.map(s => (
                   <Pressable key={s} style={[styles.chip, style === s && styles.chipActive]} onPress={() => setStyle(s)}>
-                    <Text style={style === s ? styles.chipActiveText : styles.chipText}>{s}</Text>
+                    <Text style={style === s ? styles.chipTextActive : styles.chipText}>{s}</Text>
                   </Pressable>
                 ))}
               </View>
-              <Pressable style={styles.upload} onPress={pickImages}>
-                <Text style={styles.uploadText}>{refs.length ? `已选 ${refs.length} 张参考图` : '上传参考图'}</Text>
-                <Text style={styles.uploadSub}>{refs.length ? '点缩略图可移除单张参考图' : '最多 4 张，用于以图改图'}</Text>
-              </Pressable>
-              {!!refs.length && <View style={styles.refRow}>{refs.map((r, i) => <Pressable key={i} onPress={() => setRefs(refs.filter((_, idx) => idx !== i))}><Image source={{ uri: r.uri }} style={styles.refImg} /></Pressable>)}</View>}
-              {!!progress && <View style={styles.progressWrap}><View style={[styles.progressBar, { width: `${Math.round(progress * 100)}%` }]} /><Text style={styles.progressText}>{progressText} · {Math.round(progress * 100)}% · 保持屏幕常亮</Text></View>}
-              {editBlocked && <Text style={styles.warnText}>以图改图需要先上传参考图；没有参考图时不会请求接口。</Text>}
-              <Pressable style={[styles.generate, generateDisabled && styles.disabled]} onPress={runGenerate} disabled={generateDisabled}>
-                <Text style={styles.generateText}>{!hydrated ? '正在恢复数据...' : generating ? '生成中...' : editBlocked ? '请先上传参考图' : '开始生成'}</Text>
-              </Pressable>
-            </View>
-          </>}
 
-          {tab === 'gallery' && <View style={styles.card}>
-            <View style={styles.rowBetween}>
-              <View>
-                <Text style={styles.cardTitle}>作品流</Text>
-                <Text style={styles.sub}>点开看大图，保存相册，复制提示词，或者再次修改</Text>
-              </View>
-              {!!results.length && <Pressable style={styles.smallButton} onPress={clearHistory}><Text style={styles.smallButtonText}>清空</Text></Pressable>}
-            </View>
-            {!results.length && <Text style={styles.emptyText}>{hydrated ? '暂无作品，先去创作一张。' : '正在恢复作品流...'}</Text>}
-            <View style={styles.resultGrid}>
-              {results.map((r, i) => (
-                <Pressable key={r.id || `${r.url}-${i}`} style={styles.resultCard} onPress={() => setSelected(r)}>
-                  <Image source={{ uri: r.localUri || r.url }} style={styles.resultImg} />
-                  <View style={styles.resultActions}>
-                    <Text style={styles.sub}>{r.elapsed ? `${r.elapsed}s` : ''}</Text>
-                    <Pressable style={styles.smallButton} onPress={() => editAgain(r)}><Text style={styles.smallButtonText}>再次修改</Text></Pressable>
-                  </View>
-                </Pressable>
-              ))}
-            </View>
-          </View>}
+              {/* Upload refs */}
+              <Pressable style={styles.uploadZone} onPress={pickImages}>
+                <Ionicons name="cloud-upload-outline" size={22} color={refs.length ? '#f4b63f' : '#5e5e6a'} />
+                <Text style={styles.uploadText}>
+                  {refs.length ? `已选 ${refs.length} 张参考图` : '上传参考图'}
+                </Text>
+                <Text style={styles.uploadSub}>
+                  {refs.length ? '点击缩略图可移除' : '最多 4 张，用于以图改图'}
+                </Text>
+              </Pressable>
 
-          {tab === 'settings' && <>
-            <View style={styles.settingsSummary}>
-              <View style={styles.rowBetween}>
-                <View style={styles.summaryCopy}>
-                  <Text style={styles.cardTitle}>接口配置</Text>
-                  <Text style={styles.sub}>生图与提示词优化分开计费，文本模型建议用低价 fast/mini。</Text>
+              {!!refs.length && (
+                <View style={styles.refRow}>
+                  {refs.map((r, i) => (
+                    <Pressable key={i} onPress={() => setRefs(refs.filter((_, idx) => idx !== i))}>
+                      <Image source={{ uri: r.uri }} style={styles.refThumb} />
+                    </Pressable>
+                  ))}
                 </View>
-                <Pressable style={styles.smallButton} onPress={checkHealth}><Text style={styles.smallButtonText}>测试生图</Text></Pressable>
+              )}
+
+              {/* Progress */}
+              {!!progress && (
+                <View style={styles.progressWrap}>
+                  <View style={[styles.progressBar, { width: `${Math.round(progress * 100)}%` }]} />
+                  <Text style={styles.progressText}>{progressText} · {Math.round(progress * 100)}%</Text>
+                </View>
+              )}
+
+              {editBlocked && (
+                <Text style={styles.warnText}>以图改图需要先上传参考图，否则不会请求接口。</Text>
+              )}
+            </View>
+
+            {/* Generate CTA */}
+            <Pressable style={[styles.generateBtn, generateDisabled && styles.disabled]} onPress={runGenerate} disabled={generateDisabled}>
+              <Ionicons name="flash" size={20} color={generateDisabled ? '#5e5e6a' : '#0a0a0f'} />
+              <Text style={[styles.generateBtnText, generateDisabled && styles.generateBtnTextOff]}>
+                {!hydrated ? '正在恢复数据...' : generating ? '生成中...' : editBlocked ? '请先上传参考图' : '开始生成'}
+              </Text>
+            </Pressable>
+          </>)}
+
+          {/* ═══════ GALLERY TAB ═══════ */}
+          {tab === 'gallery' && (
+            <View style={styles.glassCard}>
+              <View style={styles.rowBetween}>
+                <Text style={styles.sectionTitle}>作品流</Text>
+                {!!results.length && (
+                  <Pressable style={styles.textBtn} onPress={clearHistory}>
+                    <Text style={styles.textBtnText}>清空</Text>
+                  </Pressable>
+                )}
               </View>
-              <View style={styles.statusGrid}>
-                <View style={styles.statusCell}><Text style={styles.statusLabel}>生图</Text><Text style={styles.statusValue}>{imageModel || '未填写'}</Text><Text style={styles.statusMeta}>{maskedImageKey}</Text></View>
-                <View style={styles.statusCell}><Text style={styles.statusLabel}>文本</Text><Text style={styles.statusValue}>{textModel || '未填写'}</Text><Text style={styles.statusMeta}>{maskedTextKey}</Text></View>
+              <Text style={styles.galleryHint}>点击看大图，可保存相册、复制提示词或再次修改</Text>
+              {!results.length && (
+                <Text style={styles.emptyText}>
+                  {hydrated ? '暂无作品，先去创作一张吧' : '正在恢复作品流...'}
+                </Text>
+              )}
+              <View style={styles.resultGrid}>
+                {results.map((r, i) => (
+                  <Pressable key={r.id || `${r.url}-${i}`} style={styles.resultCard} onPress={() => setSelected(r)}>
+                    <Image source={{ uri: r.localUri || r.url }} style={styles.resultImg} />
+                    <View style={styles.resultMeta}>
+                      <Text style={styles.resultMetaText}>{r.elapsed ? `${r.elapsed}s` : ''}</Text>
+                      <Pressable style={styles.resultEditBtn} onPress={() => editAgain(r)}>
+                        <Ionicons name="create-outline" size={14} color="#f4b63f" />
+                      </Pressable>
+                    </View>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          )}
+
+          {/* ═══════ SETTINGS TAB ═══════ */}
+          {tab === 'settings' && (<>
+            {/* Connection status */}
+            <View style={styles.glassCard}>
+              <View style={styles.rowBetween}>
+                <View style={styles.flex}>
+                  <Text style={styles.sectionTitle}>接口状态</Text>
+                  <View style={styles.statusGrid}>
+                    <View style={styles.statusCell}>
+                      <View style={[styles.statusLed, imageConfigured ? styles.statusLedOk : styles.statusLedOff]} />
+                      <Text style={styles.statusCellLabel}>生图</Text>
+                      <Text style={styles.statusCellValue}>{imageConfigured ? imageModel : '未配置'}</Text>
+                      <Text style={styles.statusCellKey}>{maskedImageKey}</Text>
+                    </View>
+                    <View style={styles.statusCell}>
+                      <View style={[styles.statusLed, textConfigured ? styles.statusLedOk : styles.statusLedOff]} />
+                      <Text style={styles.statusCellLabel}>文本</Text>
+                      <Text style={styles.statusCellValue}>{textConfigured ? textModel : '未配置'}</Text>
+                      <Text style={styles.statusCellKey}>{maskedTextKey}</Text>
+                    </View>
+                  </View>
+                </View>
               </View>
               <Text style={styles.connectedText}>{connected}</Text>
+              <Pressable style={styles.testBtn} onPress={checkHealth}>
+                <Text style={styles.testBtnText}>测试生图连接</Text>
+              </Pressable>
             </View>
 
-            <View style={styles.settingsGroup}>
-              <View style={styles.compactHeader}>
-                <View>
-                  <Text style={styles.compactTitle}>生图接口</Text>
-                  <Text style={styles.compactSub}>文生图 / 以图改图</Text>
+            {/* Image API config */}
+            <View style={styles.glassCard}>
+              <Pressable style={styles.settingsHeader} onPress={() => setExpandedImageSettings(v => !v)}>
+                <View style={styles.flex}>
+                  <Text style={styles.settingsHeaderTitle}>生图接口</Text>
+                  <Text style={styles.settingsHeaderSub}>
+                    {imageConfigured ? `${imageModel} · ${maskedImageKey}` : '文生图 / 以图改图，待配置'}
+                  </Text>
                 </View>
-                <View style={styles.presetInline}>
-                  <Pressable style={styles.presetMini} onPress={() => setImageApiBase('https://api.sharehub.club')}><Text style={styles.presetText}>ShareHub</Text></Pressable>
-                  <Pressable style={styles.presetMini} onPress={() => setImageApiBase('https://pucoding.com')}><Text style={styles.presetText}>PuCoding</Text></Pressable>
+                <Ionicons name={expandedImageSettings ? 'chevron-up' : 'chevron-down'} size={20} color="#8e8e9a" />
+              </Pressable>
+              {expandedImageSettings && (<>
+                <View style={styles.presetRow}>
+                  <Pressable style={styles.presetBtn} onPress={() => setImageApiBase('https://api.sharehub.club')}>
+                    <Text style={styles.presetBtnText}>ShareHub</Text>
+                  </Pressable>
+                  <Pressable style={styles.presetBtn} onPress={() => setImageApiBase('https://pucoding.com')}>
+                    <Text style={styles.presetBtnText}>PuCoding</Text>
+                  </Pressable>
                 </View>
-              </View>
-              <View style={styles.compactField}><Text style={styles.compactLabel}>Base</Text><TextInput style={styles.compactInput} autoCapitalize="none" autoCorrect={false} value={imageApiBase} onChangeText={setImageApiBase} placeholder="https://api.sharehub.club" placeholderTextColor="#927c66" /></View>
-              <View style={styles.compactField}><Text style={styles.compactLabel}>Key</Text><TextInput style={styles.compactInput} autoCapitalize="none" autoCorrect={false} secureTextEntry value={imageApiKey} onChangeText={setImageApiKey} placeholder="sk-image..." placeholderTextColor="#927c66" /></View>
-              <View style={styles.compactField}><Text style={styles.compactLabel}>Model</Text><TextInput style={styles.compactInput} autoCapitalize="none" autoCorrect={false} value={imageModel} onChangeText={setImageModel} placeholder="gpt-image-2" placeholderTextColor="#927c66" /></View>
+                <View style={styles.configField}>
+                  <Text style={styles.configLabel}>Base</Text>
+                  <TextInput style={styles.configInput} autoCapitalize="none" autoCorrect={false} value={imageApiBase} onChangeText={setImageApiBase} placeholder="https://api.sharehub.club" placeholderTextColor="#5e5e6a" />
+                </View>
+                <View style={styles.configField}>
+                  <Text style={styles.configLabel}>Key</Text>
+                  <TextInput style={styles.configInput} autoCapitalize="none" autoCorrect={false} secureTextEntry value={imageApiKey} onChangeText={setImageApiKey} placeholder="sk-image..." placeholderTextColor="#5e5e6a" />
+                </View>
+                <View style={styles.configField}>
+                  <Text style={styles.configLabel}>Model</Text>
+                  <TextInput style={styles.configInput} autoCapitalize="none" autoCorrect={false} value={imageModel} onChangeText={setImageModel} placeholder="gpt-image-2" placeholderTextColor="#5e5e6a" />
+                </View>
+              </>)}
             </View>
 
-            <View style={styles.settingsGroup}>
-              <View style={styles.compactHeader}>
-                <View>
-                  <Text style={styles.compactTitle}>文本接口</Text>
-                  <Text style={styles.compactSub}>AI 提示词优化</Text>
+            {/* Text API config */}
+            <View style={styles.glassCard}>
+              <Pressable style={styles.settingsHeader} onPress={() => setExpandedTextSettings(v => !v)}>
+                <View style={styles.flex}>
+                  <Text style={styles.settingsHeaderTitle}>文本接口</Text>
+                  <Text style={styles.settingsHeaderSub}>
+                    {textConfigured ? `${textModel} · ${maskedTextKey}` : 'AI 提示词优化，待配置'}
+                  </Text>
                 </View>
-                <View style={styles.presetInline}>
-                  <Pressable style={styles.presetMini} onPress={() => setTextApiBase('https://api.sharehub.club')}><Text style={styles.presetText}>ShareHub</Text></Pressable>
-                  <Pressable style={styles.presetMini} onPress={() => setTextApiBase('https://pucoding.com')}><Text style={styles.presetText}>PuCoding</Text></Pressable>
+                <Ionicons name={expandedTextSettings ? 'chevron-up' : 'chevron-down'} size={20} color="#8e8e9a" />
+              </Pressable>
+              {expandedTextSettings && (<>
+                <View style={styles.presetRow}>
+                  <Pressable style={styles.presetBtn} onPress={() => setTextApiBase('https://api.sharehub.club')}>
+                    <Text style={styles.presetBtnText}>ShareHub</Text>
+                  </Pressable>
+                  <Pressable style={styles.presetBtn} onPress={() => setTextApiBase('https://pucoding.com')}>
+                    <Text style={styles.presetBtnText}>PuCoding</Text>
+                  </Pressable>
                 </View>
-              </View>
-              <View style={styles.compactField}><Text style={styles.compactLabel}>Base</Text><TextInput style={styles.compactInput} autoCapitalize="none" autoCorrect={false} value={textApiBase} onChangeText={setTextApiBase} placeholder="https://api.sharehub.club" placeholderTextColor="#927c66" /></View>
-              <View style={styles.compactField}><Text style={styles.compactLabel}>Key</Text><TextInput style={styles.compactInput} autoCapitalize="none" autoCorrect={false} secureTextEntry value={textApiKey} onChangeText={setTextApiKey} placeholder="sk-text..." placeholderTextColor="#927c66" /></View>
-              <View style={styles.compactField}><Text style={styles.compactLabel}>Model</Text><TextInput style={styles.compactInput} autoCapitalize="none" autoCorrect={false} value={textModel} onChangeText={setTextModel} placeholder="gpt-4o-mini" placeholderTextColor="#927c66" /></View>
+                <View style={styles.configField}>
+                  <Text style={styles.configLabel}>Base</Text>
+                  <TextInput style={styles.configInput} autoCapitalize="none" autoCorrect={false} value={textApiBase} onChangeText={setTextApiBase} placeholder="https://api.sharehub.club" placeholderTextColor="#5e5e6a" />
+                </View>
+                <View style={styles.configField}>
+                  <Text style={styles.configLabel}>Key</Text>
+                  <TextInput style={styles.configInput} autoCapitalize="none" autoCorrect={false} secureTextEntry value={textApiKey} onChangeText={setTextApiKey} placeholder="sk-text..." placeholderTextColor="#5e5e6a" />
+                </View>
+                <View style={styles.configField}>
+                  <Text style={styles.configLabel}>Model</Text>
+                  <TextInput style={styles.configInput} autoCapitalize="none" autoCorrect={false} value={textModel} onChangeText={setTextModel} placeholder="gpt-4o-mini" placeholderTextColor="#5e5e6a" />
+                </View>
+              </>)}
             </View>
-          </>}
+          </>)}
+
+          <View style={styles.bottomSpacer} />
         </ScrollView>
 
+        {/* ── Tab Bar ── */}
         <View style={styles.tabBar}>
           {([
-            ['create', '创作'],
-            ['gallery', '作品'],
-            ['settings', '设置'],
-          ] as [Tab, string][]).map(([key, label]) => (
+            ['create', 'color-wand-outline', 'color-wand', '创作'],
+            ['gallery', 'images-outline', 'images', '作品'],
+            ['settings', 'settings-outline', 'settings', '设置'],
+          ] as [Tab, string, string, string][]).map(([key, iconOut, iconFill, label]) => (
             <Pressable key={key} style={[styles.tabItem, tab === key && styles.tabItemActive]} onPress={() => setTab(key)}>
+              <Ionicons name={(tab === key ? iconFill : iconOut) as any} size={22} color={tab === key ? '#f4b63f' : '#5e5e6a'} />
               <Text style={tab === key ? styles.tabTextActive : styles.tabText}>{label}</Text>
             </Pressable>
           ))}
         </View>
 
+        {/* ── Fullscreen Preview Modal ── */}
         <Modal visible={!!selected} animationType="slide" onRequestClose={() => setSelected(null)}>
           <SafeAreaView style={styles.modalSafe}>
-            {selected && <>
+            {selected && (<>
+              <Pressable style={styles.modalClose} onPress={() => setSelected(null)}>
+                <Ionicons name="close" size={28} color="#f0f0f5" />
+              </Pressable>
               <Image source={{ uri: selected.localUri || selected.url }} style={styles.modalImg} resizeMode="contain" />
               <View style={styles.modalPanel}>
-                <Text style={styles.cardTitle}>作品详情</Text>
+                <Text style={styles.modalTitle}>作品详情</Text>
                 <Text style={styles.modalPrompt} numberOfLines={4}>{selected.prompt || selected.revised_prompt || ''}</Text>
                 <View style={styles.modalActions}>
-                  <Pressable style={styles.testButtonFlex} onPress={() => saveToAlbum(selected)}><Text style={styles.testButtonText}>保存相册</Text></Pressable>
-                  <Pressable style={styles.testButtonFlex} onPress={() => copyPrompt(selected.prompt || selected.revised_prompt)}><Text style={styles.testButtonText}>复制提示词</Text></Pressable>
-                  <Pressable style={styles.testButtonFlex} onPress={() => editAgain(selected)}><Text style={styles.testButtonText}>再次修改</Text></Pressable>
+                  <Pressable style={styles.modalAction} onPress={() => saveToAlbum(selected)}>
+                    <Ionicons name="download-outline" size={18} color="#0a0a0f" />
+                    <Text style={styles.modalActionText}>保存相册</Text>
+                  </Pressable>
+                  <Pressable style={styles.modalAction} onPress={() => copyPrompt(selected.prompt || selected.revised_prompt)}>
+                    <Ionicons name="copy-outline" size={18} color="#0a0a0f" />
+                    <Text style={styles.modalActionText}>复制提示词</Text>
+                  </Pressable>
+                  <Pressable style={styles.modalAction} onPress={() => editAgain(selected)}>
+                    <Ionicons name="create-outline" size={18} color="#0a0a0f" />
+                    <Text style={styles.modalActionText}>再次修改</Text>
+                  </Pressable>
                 </View>
-                <Pressable style={styles.closeButton} onPress={() => setSelected(null)}><Text style={styles.closeText}>关闭</Text></Pressable>
               </View>
-            </>}
+            </>)}
           </SafeAreaView>
         </Modal>
       </KeyboardAvoidingView>
@@ -530,104 +657,217 @@ export default function App() {
   );
 }
 
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#0d0f14' },
-  flex: { flex: 1 },
-  content: { padding: 16, paddingBottom: 42 },
-  header: { flexDirection: 'row', gap: 12, alignItems: 'center', marginBottom: 14 },
-  logo: { width: 48, height: 48, borderRadius: 16, backgroundColor: '#f4b63f', alignItems: 'center', justifyContent: 'center' },
-  logoText: { color: '#10131a', fontWeight: '900', fontSize: 24 },
-  headerTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
-  headerAction: { borderWidth: 1, borderColor: '#2a313d', backgroundColor: '#11151c', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
-  headerActionText: { color: '#d4deef', fontSize: 12, fontWeight: '800' },
-  title: { fontSize: 24, fontWeight: '900', color: '#f5f7fb' },
-  sub: { color: '#8a94a6', fontSize: 12, marginTop: 3 },
-  hero: { backgroundColor: '#121721', borderWidth: 1, borderColor: '#222a36', borderRadius: 24, padding: 16, marginBottom: 14 },
-  heroEyebrow: { color: '#f4b63f', fontSize: 12, fontWeight: '900', letterSpacing: 0 },
-  heroTitle: { color: '#f5f7fb', fontSize: 18, fontWeight: '900', lineHeight: 24, marginTop: 8 },
-  badge: { alignSelf: 'flex-start', backgroundColor: '#f4b63f', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
-  badgeText: { color: '#10131a', fontSize: 12, fontWeight: '900' },
-  statsRow: { flexDirection: 'row', gap: 8, marginTop: 14, flexWrap: 'wrap' },
-  statPill: { flexGrow: 1, minWidth: 92, borderRadius: 16, borderWidth: 1, borderColor: '#243043', backgroundColor: '#0f141c', paddingHorizontal: 12, paddingVertical: 10 },
-  statLabel: { color: '#8a94a6', fontSize: 11 },
-  statValue: { color: '#f5f7fb', fontSize: 15, fontWeight: '900', marginTop: 4 },
-  card: { backgroundColor: '#121721', borderWidth: 1, borderColor: '#222a36', borderRadius: 24, padding: 16, marginBottom: 14, shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 18, shadowOffset: { width: 0, height: 8 } },
-  cardTitle: { fontSize: 17, fontWeight: '900', color: '#f5f7fb' },
-  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10 },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
-  chip: { borderWidth: 1, borderColor: '#2a313d', backgroundColor: '#0f141c', paddingHorizontal: 12, paddingVertical: 9, borderRadius: 999 },
-  chipActive: { backgroundColor: '#f4b63f', borderColor: '#f4b63f' },
-  chipText: { color: '#c2cad6', fontSize: 12 },
-  chipActiveText: { color: '#10131a', fontSize: 12, fontWeight: '900' },
-  smallButton: { backgroundColor: '#0f141c', borderWidth: 1, borderColor: '#2a313d', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 9 },
-  segment: { flexDirection: 'row', backgroundColor: '#0f141c', borderRadius: 16, padding: 4, marginTop: 14, borderWidth: 1, borderColor: '#243043' },
-  segmentItem: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 13 },
-  segmentActive: { backgroundColor: '#f4b63f' },
-  segmentText: { color: '#9aa5b6' },
-  segmentTextActive: { color: '#10131a', fontWeight: '900' },
-  input: { minHeight: 150, borderWidth: 1, borderColor: '#2a313d', borderRadius: 18, padding: 12, backgroundColor: '#0f141c', marginTop: 14, textAlignVertical: 'top', lineHeight: 22, color: '#f5f7fb', fontSize: 16 },
-  singleInput: { height: 46, borderWidth: 1, borderColor: '#2a313d', borderRadius: 14, paddingHorizontal: 12, backgroundColor: '#0f141c', marginTop: 8, color: '#f5f7fb', fontSize: 16 },
-  label: { marginTop: 14, fontWeight: '800', color: '#c2cad6' },
-  testButton: { height: 46, backgroundColor: '#f4b63f', borderRadius: 15, alignItems: 'center', justifyContent: 'center', marginTop: 14 },
-  testButtonFlex: { flex: 1, height: 48, backgroundColor: '#f4b63f', borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
-  testButtonText: { color: '#10131a', fontWeight: '900' },
-  inlineActionRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12 },
-  inlineAction: { height: 44, paddingHorizontal: 14, backgroundColor: '#f4b63f', borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  inlineActionText: { color: '#10131a', fontWeight: '900' },
-  inlineHint: { flex: 1, borderRadius: 14, borderWidth: 1, borderColor: '#243043', backgroundColor: '#0f141c', paddingHorizontal: 12, paddingVertical: 10 },
-  inlineHintText: { color: '#8a94a6', fontSize: 12, lineHeight: 16 },
-  upload: { borderWidth: 1.5, borderStyle: 'dashed', borderColor: '#354154', backgroundColor: '#0f141c', borderRadius: 18, minHeight: 84, alignItems: 'center', justifyContent: 'center', marginTop: 14, paddingHorizontal: 12 },
-  uploadText: { color: '#f5f7fb', fontWeight: '900' },
-  uploadSub: { color: '#8a94a6', fontSize: 12, marginTop: 4, textAlign: 'center', lineHeight: 16 },
-  refRow: { flexDirection: 'row', gap: 8, marginTop: 10, flexWrap: 'wrap' },
-  refImg: { width: 70, height: 70, borderRadius: 14 },
-  progressWrap: { height: 30, backgroundColor: '#0f141c', borderRadius: 999, overflow: 'hidden', marginTop: 14, justifyContent: 'center', borderWidth: 1, borderColor: '#243043' },
-  progressBar: { position: 'absolute', left: 0, top: 0, bottom: 0, backgroundColor: '#f4b63f' },
-  progressText: { textAlign: 'center', fontWeight: '900', fontSize: 12, color: '#f5f7fb' },
-  generate: { height: 56, backgroundColor: '#ff7a1a', borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginTop: 16 },
-  disabled: { opacity: 0.58 },
-  generateText: { color: 'white', fontSize: 16, fontWeight: '900' },
-  resultGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 12 },
-  resultCard: { width: '48%', borderRadius: 20, overflow: 'hidden', backgroundColor: '#0f141c', borderWidth: 1, borderColor: '#243043' },
-  resultImg: { width: '100%', aspectRatio: 1 },
-  resultActions: { padding: 10, gap: 8 },
-  modalSafe: { flex: 1, backgroundColor: '#090b0f' },
-  modalImg: { flex: 1, width: '100%' },
-  modalPanel: { backgroundColor: '#121721', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 16, borderTopWidth: 1, borderColor: '#222a36' },
-  modalPrompt: { color: '#c2cad6', lineHeight: 20, marginTop: 8 },
-  modalActions: { flexDirection: 'row', gap: 10, marginTop: 14 },
-  closeButton: { height: 46, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
-  warnText: { marginTop: 12, color: '#ff8a8a', fontSize: 12, lineHeight: 18, fontWeight: '700' },
-  closeText: { fontWeight: '900', color: '#d4deef' },
-  inputCompact: { minHeight: 118, borderWidth: 1, borderColor: '#2a313d', borderRadius: 18, padding: 12, backgroundColor: '#0f141c', marginTop: 14, textAlignVertical: 'top', lineHeight: 22, color: '#f5f7fb', fontSize: 16 },
-  inlineGhost: { height: 44, paddingHorizontal: 14, borderWidth: 1, borderColor: '#2a313d', backgroundColor: '#0f141c', borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  inlineGhostText: { color: '#d4deef', fontWeight: '900' },
-  presetRow: { flexDirection: 'row', gap: 8, marginTop: 14 },
-  presetButton: { borderWidth: 1, borderColor: '#2a313d', backgroundColor: '#0f141c', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
-  presetText: { color: '#d4deef', fontSize: 12, fontWeight: '900' },
-  settingsSummary: { backgroundColor: '#121721', borderWidth: 1, borderColor: '#222a36', borderRadius: 18, padding: 14, marginBottom: 10 },
-  summaryCopy: { flex: 1 },
-  statusGrid: { flexDirection: 'row', gap: 8, marginTop: 12 },
-  statusCell: { flex: 1, borderWidth: 1, borderColor: '#243043', backgroundColor: '#0f141c', borderRadius: 14, paddingHorizontal: 10, paddingVertical: 9 },
-  statusLabel: { color: '#8a94a6', fontSize: 11, fontWeight: '800' },
-  statusValue: { color: '#f5f7fb', fontSize: 12, fontWeight: '900', marginTop: 4 },
-  statusMeta: { color: '#8a94a6', fontSize: 11, marginTop: 3 },
-  connectedText: { color: '#c2cad6', fontSize: 12, marginTop: 10, lineHeight: 16 },
-  settingsGroup: { backgroundColor: '#121721', borderWidth: 1, borderColor: '#222a36', borderRadius: 18, padding: 12, marginBottom: 10 },
-  compactHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 8 },
-  compactTitle: { color: '#f5f7fb', fontSize: 15, fontWeight: '900' },
-  compactSub: { color: '#8a94a6', fontSize: 11, marginTop: 2 },
-  presetInline: { flexDirection: 'row', gap: 6, flexShrink: 0 },
-  presetMini: { borderWidth: 1, borderColor: '#2a313d', backgroundColor: '#0f141c', borderRadius: 999, paddingHorizontal: 9, paddingVertical: 6 },
-  compactField: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 7 },
-  compactLabel: { width: 48, color: '#c2cad6', fontSize: 12, fontWeight: '900' },
-  compactInput: { flex: 1, minHeight: 40, borderWidth: 1, borderColor: '#2a313d', borderRadius: 12, paddingHorizontal: 10, backgroundColor: '#0f141c', color: '#f5f7fb', fontSize: 14 },
-  smallButtonText: { color: '#d4deef', fontSize: 12, fontWeight: '900' },
-  emptyText: { color: '#8a94a6', fontSize: 13, marginTop: 18, lineHeight: 20 },
-  tabBar: { flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingTop: 10, paddingBottom: Platform.OS === 'ios' ? 18 : 12, backgroundColor: '#0d0f14', borderTopWidth: 1, borderTopColor: '#222a36' },
-  tabItem: { flex: 1, height: 44, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0f141c', borderWidth: 1, borderColor: '#243043' },
-  tabItemActive: { backgroundColor: '#f4b63f', borderColor: '#f4b63f' },
-  tabText: { color: '#9aa5b6', fontWeight: '900' },
-  tabTextActive: { color: '#10131a', fontWeight: '900' },
-});
+const C = {
+  bg: '#08080c',
+  surface: '#0f0f16',
+  surfaceHover: '#14141d',
+  border: 'rgba(255,255,255,0.06)',
+  borderFocus: 'rgba(244,182,63,0.25)',
+  gold: '#f4b63f',
+  goldMuted: '#d4a02a',
+  text: '#f0f0f5',
+  textSecondary: '#8e8e9a',
+  textMuted: '#5e5e6a',
+  danger: '#ff6b6b',
+};
 
+const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: C.bg },
+  flex: { flex: 1 },
+  content: { padding: 16, paddingBottom: 16 },
+  bottomSpacer: { height: 24 },
+
+  // Header
+  header: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 20, marginTop: 8 },
+  logo: {
+    width: 46, height: 46, borderRadius: 14,
+    backgroundColor: C.gold,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  title: { fontSize: 26, fontWeight: '900', color: C.text, letterSpacing: 1 },
+  sub: { color: C.textSecondary, fontSize: 13, marginTop: 1 },
+  statusDot: { width: 10, height: 10, borderRadius: 5, marginLeft: 'auto' },
+  statusDotOk: { backgroundColor: '#4ade80' },
+  statusDotOff: { backgroundColor: '#3f3f4a' },
+
+  // Glass card
+  glassCard: {
+    backgroundColor: C.surface,
+    borderWidth: 1, borderColor: C.border,
+    borderRadius: 20, padding: 16, marginBottom: 14,
+  },
+
+  // Mode row
+  modeRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
+  modeBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    height: 44, borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 1, borderColor: C.border,
+  },
+  modeBtnActive: { backgroundColor: C.gold, borderColor: C.gold },
+  modeBtnText: { color: C.textSecondary, fontSize: 15, fontWeight: '700' },
+  modeBtnTextActive: { color: '#0a0a0f', fontSize: 15, fontWeight: '800' },
+
+  // Prompt input
+  promptInput: {
+    minHeight: 140, maxHeight: 260,
+    backgroundColor: 'rgba(255,255,255,0.02)',
+    borderWidth: 1, borderColor: C.border,
+    borderRadius: 16, padding: 14,
+    color: C.text, fontSize: 17, lineHeight: 26,
+    textAlignVertical: 'top',
+  },
+
+  // Inline actions
+  inlineActions: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  inlineAction: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    height: 42, paddingHorizontal: 16,
+    backgroundColor: C.gold, borderRadius: 13,
+  },
+  inlineActionText: { color: '#0a0a0f', fontSize: 14, fontWeight: '800' },
+  inlineGhost: {
+    height: 42, paddingHorizontal: 14,
+    borderWidth: 1, borderColor: C.border,
+    backgroundColor: 'rgba(255,255,255,0.02)',
+    borderRadius: 13, alignItems: 'center', justifyContent: 'center',
+  },
+  inlineGhostText: { color: C.textSecondary, fontSize: 14, fontWeight: '700' },
+  disabled: { opacity: 0.45 },
+
+  // Section title
+  sectionTitle: { color: C.text, fontSize: 15, fontWeight: '800', marginBottom: 10 },
+  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+
+  // Chips
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 },
+  chip: {
+    borderWidth: 1, borderColor: C.border,
+    backgroundColor: 'rgba(255,255,255,0.02)',
+    paddingHorizontal: 14, paddingVertical: 9, borderRadius: 999,
+  },
+  chipActive: { backgroundColor: C.gold, borderColor: C.gold },
+  chipText: { color: C.textSecondary, fontSize: 13, fontWeight: '600' },
+  chipTextActive: { color: '#0a0a0f', fontSize: 13, fontWeight: '800' },
+
+  // Upload
+  uploadZone: {
+    borderWidth: 1.5, borderStyle: 'dashed',
+    borderColor: C.border, borderRadius: 16,
+    minHeight: 72, alignItems: 'center', justifyContent: 'center',
+    paddingVertical: 14, paddingHorizontal: 12, marginTop: 4, marginBottom: 4,
+  },
+  uploadText: { color: C.text, fontSize: 15, fontWeight: '800', marginTop: 6 },
+  uploadSub: { color: C.textMuted, fontSize: 12, marginTop: 2 },
+
+  // Ref thumbs
+  refRow: { flexDirection: 'row', gap: 8, marginTop: 10, flexWrap: 'wrap' },
+  refThumb: { width: 64, height: 64, borderRadius: 12, borderWidth: 1, borderColor: C.border },
+
+  // Progress
+  progressWrap: { height: 32, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 999, overflow: 'hidden', marginTop: 14, justifyContent: 'center', borderWidth: 1, borderColor: C.border },
+  progressBar: { position: 'absolute', left: 0, top: 0, bottom: 0, backgroundColor: C.gold },
+  progressText: { textAlign: 'center', fontWeight: '800', fontSize: 12, color: C.text },
+
+  warnText: { marginTop: 12, color: C.danger, fontSize: 12, lineHeight: 18, fontWeight: '600' },
+
+  // Generate CTA
+  generateBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    height: 56, backgroundColor: C.gold, borderRadius: 18, marginTop: 12,
+  },
+  generateBtnText: { color: '#0a0a0f', fontSize: 17, fontWeight: '900' },
+  generateBtnTextOff: { color: '#5e5e6a' },
+
+  // Gallery
+  galleryHint: { color: C.textMuted, fontSize: 12, marginTop: 2, marginBottom: 14 },
+  emptyText: { color: C.textMuted, fontSize: 14, marginTop: 18, marginBottom: 18, textAlign: 'center', lineHeight: 22 },
+  textBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: C.border },
+  textBtnText: { color: C.textSecondary, fontSize: 12, fontWeight: '700' },
+
+  resultGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  resultCard: {
+    width: '47.5%', borderRadius: 16, overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.02)',
+    borderWidth: 1, borderColor: C.border,
+  },
+  resultImg: { width: '100%', aspectRatio: 1 },
+  resultMeta: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 10, paddingVertical: 8,
+  },
+  resultMetaText: { color: C.textMuted, fontSize: 11, fontWeight: '600' },
+  resultEditBtn: { padding: 4 },
+
+  // Settings
+  statusGrid: { flexDirection: 'row', gap: 10, marginTop: 8 },
+  statusCell: {
+    flex: 1, alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.02)',
+    borderRadius: 14, padding: 12,
+    borderWidth: 1, borderColor: C.border,
+  },
+  statusLed: { width: 8, height: 8, borderRadius: 4, marginBottom: 6 },
+  statusLedOk: { backgroundColor: '#4ade80' },
+  statusLedOff: { backgroundColor: '#3f3f4a' },
+  statusCellLabel: { color: C.textSecondary, fontSize: 11, fontWeight: '700', marginBottom: 2 },
+  statusCellValue: { color: C.text, fontSize: 13, fontWeight: '800' },
+  statusCellKey: { color: C.textMuted, fontSize: 10, marginTop: 2 },
+  connectedText: { color: C.textSecondary, fontSize: 12, marginTop: 12, lineHeight: 18 },
+  testBtn: {
+    height: 40, backgroundColor: C.gold, borderRadius: 12,
+    alignItems: 'center', justifyContent: 'center', marginTop: 12,
+  },
+  testBtnText: { color: '#0a0a0f', fontSize: 14, fontWeight: '800' },
+
+  settingsHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  settingsHeaderTitle: { color: C.text, fontSize: 15, fontWeight: '800' },
+  settingsHeaderSub: { color: C.textSecondary, fontSize: 12, marginTop: 2 },
+
+  presetRow: { flexDirection: 'row', gap: 8, marginTop: 14 },
+  presetBtn: {
+    borderWidth: 1, borderColor: C.border,
+    backgroundColor: 'rgba(255,255,255,0.02)',
+    borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7,
+  },
+  presetBtnText: { color: C.textSecondary, fontSize: 12, fontWeight: '700' },
+
+  configField: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10 },
+  configLabel: { width: 44, color: C.textSecondary, fontSize: 13, fontWeight: '700' },
+  configInput: {
+    flex: 1, minHeight: 42,
+    borderWidth: 1, borderColor: C.border,
+    borderRadius: 12, paddingHorizontal: 12,
+    backgroundColor: 'rgba(255,255,255,0.02)',
+    color: C.text, fontSize: 14,
+  },
+
+  // Tab bar
+  tabBar: {
+    flexDirection: 'row', gap: 0,
+    paddingHorizontal: 16, paddingTop: 10, paddingBottom: Platform.OS === 'ios' ? 28 : 12,
+    backgroundColor: C.surface, borderTopWidth: 1, borderTopColor: C.border,
+  },
+  tabItem: { flex: 1, height: 52, borderRadius: 14, alignItems: 'center', justifyContent: 'center', gap: 2 },
+  tabItemActive: { backgroundColor: 'rgba(244,182,63,0.1)' },
+  tabText: { color: C.textMuted, fontSize: 11, fontWeight: '700' },
+  tabTextActive: { color: C.gold, fontSize: 11, fontWeight: '800' },
+
+  // Modal
+  modalSafe: { flex: 1, backgroundColor: '#050508' },
+  modalClose: { position: 'absolute', top: Platform.OS === 'ios' ? 56 : 16, right: 16, zIndex: 10, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' },
+  modalImg: { flex: 1, width: '100%' },
+  modalPanel: {
+    backgroundColor: C.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: 20, borderTopWidth: 1, borderColor: C.border,
+  },
+  modalTitle: { color: C.text, fontSize: 17, fontWeight: '900', marginBottom: 8 },
+  modalPrompt: { color: C.textSecondary, lineHeight: 20 },
+  modalActions: { flexDirection: 'row', gap: 10, marginTop: 16 },
+  modalAction: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    height: 44, backgroundColor: C.gold, borderRadius: 13,
+  },
+  modalActionText: { color: '#0a0a0f', fontSize: 13, fontWeight: '800' },
+});
