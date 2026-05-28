@@ -2,7 +2,7 @@
   "expo": {
     "name": "画刃",
     "slug": "huaren",
-    "version": "0.4.0",
+    "version": "0.4.1",
     "orientation": "portrait",
     "scheme": "huaren",
     "userInterfaceStyle": "light",
@@ -28,16 +28,16 @@
         }
       },
       "icon": "./assets/icon.png",
-      "buildNumber": "20260527.3"
+      "buildNumber": "20260528.1"
     },
     "extra": {
       "defaultApiBase": "https://pucoding.com",
       "eas": {
         "projectId": "22b8fa83-0b79-436f-a751-e3cd58a1a064"
       },
-      "appVersion": "0.4.0",
-      "buildNumber": "20260527.3",
-      "buildLabel": "液态玻璃版"
+      "appVersion": "0.4.1",
+      "buildNumber": "20260528.1",
+      "buildLabel": "参考图贴近版"
     },
     "icon": "./assets/icon.png",
     "splash": {
