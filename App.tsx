@@ -29,6 +29,7 @@ import { useKeepAwake } from "expo-keep-awake";
 import * as Clipboard from "expo-clipboard";
 import { Ionicons } from "@expo/vector-icons";
 import {
+  askAssistant,
   editImage,
   generateImage,
   health,
@@ -187,6 +188,9 @@ export default function App() {
   const [progress, setProgress] = useState(0);
   const [progressText, setProgressText] = useState("");
   const [optimizing, setOptimizing] = useState(false);
+  const [assisting, setAssisting] = useState(false);
+  const [assistantMsg, setAssistantMsg] = useState("");
+  const [assistantChips, setAssistantChips] = useState<string[]>([]);
   const [results, setResults] = useState<GenerateResult[]>([]);
   const [selected, setSelected] = useState<GenerateResult | null>(null);
   const progressTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -366,7 +370,8 @@ export default function App() {
     setConnected("测试生图连接中...");
     try {
       const h = await health(imageConfig);
-      setConnected(`生图接口正常 · ${h.imageModel || imageModel}`);
+      if (h.ok) setConnected(`生图接口正常 · ${h.imageModel || imageModel}`);
+      else setConnected(`生图连接失败: ${h.error || "接口无响应"}`);
     } catch (e: any) {
       setConnected(`生图连接失败: ${e.message}`);
     }
@@ -410,6 +415,33 @@ export default function App() {
     } finally {
       setOptimizing(false);
     }
+  }
+
+  async function runAssistant() {
+    if (!textApiKey.trim())
+      return Alert.alert("缺少文本 API Key", "请先在设置里填写文本接口 API Key。");
+    setAssisting(true);
+    try {
+      const r = await askAssistant(textConfig, {
+        prompt,
+        mode,
+        refCount: refs.length,
+      });
+      setAssistantMsg(r.message);
+      setAssistantChips(r.chips || []);
+    } catch (e: any) {
+      Alert.alert("助手失败", friendlyErrorMessage(e));
+    } finally {
+      setAssisting(false);
+    }
+  }
+
+  function applyChip(chip: string) {
+    setPrompt((p) => {
+      const t = p.trim();
+      if (!t) return chip;
+      return /[，,、]$/.test(t) ? t + chip : t + "，" + chip;
+    });
   }
 
   async function runGenerate() {
@@ -571,16 +603,28 @@ export default function App() {
               <View style={styles.promptCard}>
                 <View style={styles.promptHead}>
                   <Text style={styles.promptLabel}>PROMPT</Text>
-                  <Pressable
-                    style={styles.magic}
-                    onPress={runOptimize}
-                    disabled={optimizing}
-                  >
-                    <Ionicons name="sparkles" size={14} color="#fff3c2" />
-                    <Text style={styles.magicText}>
-                      {optimizing ? "优化中" : "优化"}
-                    </Text>
-                  </Pressable>
+                  <View style={styles.headActions}>
+                    <Pressable
+                      style={styles.magic}
+                      onPress={runAssistant}
+                      disabled={assisting || optimizing}
+                    >
+                      <Ionicons name="bulb" size={14} color="#bfe9ff" />
+                      <Text style={[styles.magicText, styles.magicTextBlue]}>
+                        {assisting ? "思考中" : "助手"}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      style={styles.magic}
+                      onPress={runOptimize}
+                      disabled={optimizing || assisting}
+                    >
+                      <Ionicons name="sparkles" size={14} color="#fff3c2" />
+                      <Text style={styles.magicText}>
+                        {optimizing ? "优化中" : "优化"}
+                      </Text>
+                    </Pressable>
+                  </View>
                 </View>
                 <TextInput
                   style={styles.promptInput}
@@ -592,6 +636,37 @@ export default function App() {
                   editable={!generating && !optimizing}
                 />
               </View>
+              {!!assistantMsg && (
+                <View style={styles.assistCard}>
+                  <View style={styles.assistHead}>
+                    <Ionicons name="sparkles" size={14} color="#bfe9ff" />
+                    <Text style={styles.assistTitle}>创作助手</Text>
+                    <Pressable
+                      hitSlop={10}
+                      onPress={() => {
+                        setAssistantMsg("");
+                        setAssistantChips([]);
+                      }}
+                    >
+                      <Ionicons name="close" size={16} color={C.muted} />
+                    </Pressable>
+                  </View>
+                  <Text style={styles.assistMsg}>{assistantMsg}</Text>
+                  {!!assistantChips.length && (
+                    <View style={styles.assistChips}>
+                      {assistantChips.map((c, i) => (
+                        <Pressable
+                          key={i}
+                          style={styles.assistChip}
+                          onPress={() => applyChip(c)}
+                        >
+                          <Text style={styles.assistChipText}>＋ {c}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              )}
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
@@ -638,26 +713,18 @@ export default function App() {
               </ScrollView>
               <View style={styles.tools}>
                 <Pressable style={styles.tool} onPress={pickImages}>
-                  <Ionicons name="add" size={24} color="#fff" />
+                  <Ionicons name="image-outline" size={22} color="#fff" />
                   <Text style={styles.toolText}>
-                    {refs.length ? refs.length + " 张" : "参考图"}
+                    {refs.length ? "参考图 " + refs.length + " 张" : "上传参考图"}
                   </Text>
                 </Pressable>
-                <Pressable style={styles.tool} onPress={() => setMode("edit")}>
-                  <Ionicons name="create-outline" size={22} color="#fff" />
-                  <Text style={styles.toolText}>局部改</Text>
-                </Pressable>
                 <Pressable
-                  style={[styles.tool, generateDisabled && styles.disabled]}
-                  onPress={runGenerate}
-                  disabled={generateDisabled}
+                  style={[styles.tool, !prompt && styles.disabled]}
+                  onPress={() => setPrompt("")}
+                  disabled={!prompt}
                 >
-                  <Ionicons name="refresh" size={22} color="#fff" />
-                  <Text style={styles.toolText}>再生成</Text>
-                </Pressable>
-                <Pressable style={styles.tool} onPress={() => setPrompt("")}>
                   <Ionicons name="backspace-outline" size={22} color="#fff" />
-                  <Text style={styles.toolText}>清空</Text>
+                  <Text style={styles.toolText}>清空提示词</Text>
                 </Pressable>
               </View>
               {!!refs.length && (
@@ -1119,6 +1186,39 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   magicText: { color: "#fff3c2", fontSize: 12, fontWeight: "900" },
+  magicTextBlue: { color: "#bfe9ff" },
+  headActions: { flexDirection: "row", alignItems: "center", gap: 4 },
+  assistCard: {
+    ...glass,
+    borderRadius: 22,
+    padding: 15,
+    marginBottom: 13,
+    borderColor: "rgba(150,210,255,.35)",
+  },
+  assistHead: { flexDirection: "row", alignItems: "center", gap: 7 },
+  assistTitle: {
+    flex: 1,
+    color: "#bfe9ff",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  assistMsg: {
+    color: C.ink,
+    fontSize: 14,
+    lineHeight: 22,
+    fontWeight: "600",
+    marginTop: 10,
+  },
+  assistChips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 12 },
+  assistChip: {
+    backgroundColor: "rgba(150,210,255,.16)",
+    borderWidth: 1,
+    borderColor: "rgba(150,210,255,.34)",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  assistChipText: { color: "#d6efff", fontSize: 12, fontWeight: "900" },
   promptInput: {
     flex: 1,
     minHeight: 154,
