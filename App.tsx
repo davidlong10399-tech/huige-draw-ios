@@ -342,6 +342,9 @@ export default function App() {
 
   function friendlyErrorMessage(error: any) {
     const message = error?.message || String(error);
+    if (/请求超时（已等待/.test(message)) {
+      return message + "（本地生图较慢属正常，可保持前台等待或重试）";
+    }
     if (/504|timeout|timed out|Gateway Timeout/i.test(message)) {
       return "服务商超时(504)。这不是 App 卡住，请稍后重试或切换中转站/模型。";
     }

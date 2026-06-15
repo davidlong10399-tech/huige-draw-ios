@@ -9,6 +9,26 @@ export type RefImage = { name: string; uri: string; mimeType?: string };
 
 type Json = Record<string, any>;
 
+// 本地 AI Studio 生图慢，默认 fetch 走系统 60s 超时会被掐断。
+// 统一拉满到 300s；测试连接等轻量请求另传短超时（快速失败）。
+const DEFAULT_TIMEOUT_MS = 300_000;
+const HEALTH_TIMEOUT_MS = 20_000;
+
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (e: any) {
+    if (e?.name === 'AbortError') {
+      throw new Error(`请求超时（已等待 ${Math.round(timeoutMs / 1000)} 秒），请检查本地服务或稍后重试。timeout`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function normalizeBaseUrl(input: string) {
   return String(input || '').trim().replace(/\/v1\/?$/, '').replace(/\/$/, '');
 }
@@ -113,7 +133,7 @@ function contentText(value: any): string {
 
 async function apiPost(config: DirectApiConfig, path: string, body: unknown): Promise<Json> {
   const baseUrl = normalizeBaseUrl(config.apiBase);
-  const res = await fetch(`${baseUrl}${path}`, {
+  const res = await fetchWithTimeout(`${baseUrl}${path}`, {
     method: 'POST',
     headers: headersFor(config),
     body: JSON.stringify(body),
@@ -213,7 +233,7 @@ async function requestAssistantText(config: DirectApiConfig, system: string, use
   let lastErr = '';
   for (const attempt of attempts) {
     try {
-      const res = await fetch(`${baseUrl}${attempt.path}`, {
+      const res = await fetchWithTimeout(`${baseUrl}${attempt.path}`, {
         method: 'POST',
         headers: headersFor(config),
         body: JSON.stringify(attempt.body),
@@ -415,7 +435,7 @@ export async function editImage(config: DirectApiConfig, payload: { prompt: stri
       form.append('image', { uri: img.uri, name: img.name || `ref-${i + 1}.png`, type: img.mimeType || 'image/png' } as any);
     });
     try {
-      const res = await fetch(`${baseUrl}${ep}`, { method: 'POST', headers: config.apiKey?.trim() ? { Authorization: `Bearer ${config.apiKey.trim()}` } : undefined, body: form });
+      const res = await fetchWithTimeout(`${baseUrl}${ep}`, { method: 'POST', headers: config.apiKey?.trim() ? { Authorization: `Bearer ${config.apiKey.trim()}` } : undefined, body: form });
       const text = await res.text();
       let json: any = {};
       try { json = text ? JSON.parse(text) : {}; } catch { json = { raw: text }; }
@@ -462,9 +482,9 @@ export async function health(config: DirectApiConfig) {
   let lastErr = '';
   for (const path of attempts) {
     try {
-      const res = await fetch(`${baseUrl}${path}`, {
+      const res = await fetchWithTimeout(`${baseUrl}${path}`, {
         headers: config.apiKey?.trim() ? { Authorization: `Bearer ${config.apiKey.trim()}` } : undefined,
-      });
+      }, HEALTH_TIMEOUT_MS);
       const text = await res.text();
       let json: any = {};
       try { json = text ? JSON.parse(text) : {}; } catch { json = { raw: text }; }
