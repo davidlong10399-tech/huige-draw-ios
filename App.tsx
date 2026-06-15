@@ -63,6 +63,7 @@ const HISTORY_KEY = "huige-draw-history-v3";
 const MAX_HISTORY = 50;
 const stylesList = [
   "商业海报",
+  "真实自拍",
   "电影感",
   "真实摄影",
   "国潮",
@@ -71,6 +72,7 @@ const stylesList = [
 ];
 const stylePrompts: Record<string, string> = {
   商业海报: "商业海报设计，强视觉冲击，高级排版，真实光影",
+  真实自拍: "真实手机自拍照，前置摄像头视角，自然肤质与毛孔细节，随手抓拍的生活感，轻微噪点与真实光线，非专业摆拍，朋友圈日常质感",
   电影感: "电影感构图，戏剧化光影，浅景深，色彩分级",
   真实摄影: "真实摄影，自然光影，细节丰富，高分辨率",
   国潮: "国潮东方美学，红金色调，精致纹样",
@@ -182,6 +184,7 @@ export default function App() {
   const [mode, setMode] = useState<Mode>("generate");
   const [prompt, setPrompt] = useState("");
   const [size, setSize] = useState("1:1");
+  const [resolution, setResolution] = useState("std");
   const [style, setStyle] = useState("商业海报");
   const [refs, setRefs] = useState<RefImage[]>([]);
   const [generating, setGenerating] = useState(false);
@@ -465,9 +468,10 @@ export default function App() {
           ? await editImage(imageConfig, {
               prompt: fullPrompt,
               size,
+              resolution,
               images: refs,
             })
-          : await generateImage(imageConfig, { prompt: fullPrompt, size });
+          : await generateImage(imageConfig, { prompt: fullPrompt, size, resolution });
       const item: GenerateResult = {
         ...raw,
         id: makeId(),
@@ -688,6 +692,32 @@ export default function App() {
                         style={active ? styles.chipTextActive : styles.chipText}
                       >
                         {s}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.chipRow}
+              >
+                {[
+                  { key: "std", label: "标准" },
+                  { key: "2k", label: "2K 高清" },
+                  { key: "4k", label: "4K 超清" },
+                ].map((r) => {
+                  const active = resolution === r.key;
+                  return (
+                    <Pressable
+                      key={r.key}
+                      style={[styles.chip, active && styles.chipActive]}
+                      onPress={() => setResolution(r.key)}
+                    >
+                      <Text
+                        style={active ? styles.chipTextActive : styles.chipText}
+                      >
+                        {r.label}
                       </Text>
                     </Pressable>
                   );

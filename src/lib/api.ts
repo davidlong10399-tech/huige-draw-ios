@@ -303,8 +303,17 @@ function normalizeImageUrl(url: string, baseUrl: string) {
   return url;
 }
 
-function sizeValue(size: string) {
-  return size === '16:9' ? '1792x1024' : size === '9:16' ? '1024x1792' : '1024x1024';
+// 比例 × 分辨率 → 实际像素。中转站已支持 2K/4K。
+// resolution: 'std'(标准 1K) | '2k' | '4k'
+const SIZE_TABLE: Record<string, Record<string, string>> = {
+  std: { '1:1': '1024x1024', '16:9': '1792x1024', '9:16': '1024x1792' },
+  '2k': { '1:1': '2048x2048', '16:9': '2560x1440', '9:16': '1440x2560' },
+  '4k': { '1:1': '4096x4096', '16:9': '3840x2160', '9:16': '2160x3840' },
+};
+
+function sizeValue(size: string, resolution = 'std') {
+  const tier = SIZE_TABLE[resolution] || SIZE_TABLE.std;
+  return tier[size] || tier['1:1'];
 }
 
 function imageUrlFromResponse(data: Json) {
@@ -400,11 +409,12 @@ export async function askAssistant(config: DirectApiConfig, payload: { prompt: s
   return { message, chips, model: config.assistantModel };
 }
 
-export async function generateImage(config: DirectApiConfig, payload: { prompt: string; size: string }) {
+export async function generateImage(config: DirectApiConfig, payload: { prompt: string; size: string; resolution?: string }) {
   const baseUrl = normalizeBaseUrl(config.apiBase);
+  const px = sizeValue(payload.size, payload.resolution);
   const attempts = [
-    { path: '/v1/images/generations', body: { model: config.imageModel, prompt: payload.prompt, n: 1, size: sizeValue(payload.size), response_format: 'b64_json' } },
-    { path: '/v1/images/generate', body: { model: config.imageModel, prompt: payload.prompt, size: sizeValue(payload.size) } },
+    { path: '/v1/images/generations', body: { model: config.imageModel, prompt: payload.prompt, n: 1, size: px, response_format: 'b64_json' } },
+    { path: '/v1/images/generate', body: { model: config.imageModel, prompt: payload.prompt, size: px } },
   ];
   let lastErr = '';
   for (const attempt of attempts) {
@@ -420,7 +430,7 @@ export async function generateImage(config: DirectApiConfig, payload: { prompt: 
   throw new Error(lastErr || 'Generate API failed');
 }
 
-export async function editImage(config: DirectApiConfig, payload: { prompt: string; size: string; images: RefImage[] }) {
+export async function editImage(config: DirectApiConfig, payload: { prompt: string; size: string; images: RefImage[]; resolution?: string }) {
   if (!payload.images?.length) throw new Error('参考图编辑需要先上传图片');
   const baseUrl = normalizeBaseUrl(config.apiBase);
   let lastErr = '';
@@ -428,7 +438,7 @@ export async function editImage(config: DirectApiConfig, payload: { prompt: stri
     const form = new FormData();
     form.append('model', config.imageModel);
     form.append('prompt', payload.prompt);
-    form.append('size', sizeValue(payload.size));
+    form.append('size', sizeValue(payload.size, payload.resolution));
     form.append('n', '1');
     form.append('response_format', 'b64_json');
     payload.images.forEach((img, i) => {
