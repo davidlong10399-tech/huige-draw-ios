@@ -207,6 +207,50 @@ function extractTextResponse(raw: any): string {
   return '';
 }
 
+// 解析返回体：兼容普通 JSON 和 SSE 流式 (data: {...}\n...\ndata: [DONE])。
+// 返回一个统一的 json 对象，SSE 会把流式 delta 拼成 message.content。
+function parseAssistantBody(text: string): { json: any; streamedText: string } {
+  const trimmed = (text || '').trimStart();
+  // 非 SSE：直接当 JSON 解析
+  if (!trimmed.startsWith('data:')) {
+    try {
+      return { json: trimmed ? JSON.parse(trimmed) : {}, streamedText: '' };
+    } catch {
+      return { json: { raw: text }, streamedText: '' };
+    }
+  }
+  // SSE：逐行抽 data:，拼接 delta.content / message.content
+  let acc = '';
+  let firstError: any = null;
+  for (const line of text.split(/\r?\n/)) {
+    const m = line.match(/^\s*data:\s?(.*)$/);
+    if (!m) continue;
+    const payload = m[1].trim();
+    if (!payload || payload === '[DONE]') continue;
+    let obj: any;
+    try {
+      obj = JSON.parse(payload);
+    } catch {
+      continue;
+    }
+    if (obj?.error && !firstError) firstError = obj.error;
+    const choice = obj?.choices?.[0];
+    const piece = firstString(
+      choice?.delta?.content,
+      choice?.message?.content,
+      choice?.text,
+      obj?.output_text,
+    );
+    if (piece) acc += piece;
+  }
+  const json = acc
+    ? { choices: [{ message: { content: acc } }] }
+    : firstError
+      ? { error: firstError }
+      : { raw: text };
+  return { json, streamedText: acc };
+}
+
 async function requestAssistantText(config: DirectApiConfig, system: string, user: string) {
   const baseUrl = normalizeBaseUrl(config.apiBase);
   const attempts = [
@@ -215,8 +259,9 @@ async function requestAssistantText(config: DirectApiConfig, system: string, use
       body: {
         model: config.assistantModel,
         messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-        temperature: 0.45,
-        max_tokens: 700,
+        // gpt-5.x 等新模型不认 max_tokens（会导致输出窗口为 0、返回空 choices），
+        // 用 max_completion_tokens；同时不传自定义 temperature（部分模型只接受默认值）。
+        max_completion_tokens: 700,
       },
     },
     {
@@ -224,7 +269,6 @@ async function requestAssistantText(config: DirectApiConfig, system: string, use
       body: {
         model: config.assistantModel,
         input: `${system}\n\n${user}`,
-        temperature: 0.45,
         max_output_tokens: 700,
       },
     },
@@ -239,12 +283,7 @@ async function requestAssistantText(config: DirectApiConfig, system: string, use
         body: JSON.stringify(attempt.body),
       });
       const text = await res.text();
-      let json: any = {};
-      try {
-        json = text ? JSON.parse(text) : {};
-      } catch {
-        json = { raw: text };
-      }
+      const { json } = parseAssistantBody(text);
       if (!res.ok || json.error) throw new Error(json.error?.message || json.error || json.raw || `HTTP ${res.status}`);
       const extracted = extractTextResponse(json);
       if (extracted) return extracted;
