@@ -7,6 +7,12 @@ jobs:
   build-ios-unsigned:
     runs-on: macos-latest
     timeout-minutes: 60
+    env:
+      EXPO_PUBLIC_HUIGE_API_BASE: ${{ secrets.EXPO_PUBLIC_HUIGE_API_BASE }}
+      EXPO_PUBLIC_HUIGE_API_KEY: ${{ secrets.EXPO_PUBLIC_HUIGE_API_KEY }}
+      EXPO_PUBLIC_HUIGE_IMAGE_MODEL: ${{ secrets.EXPO_PUBLIC_HUIGE_IMAGE_MODEL }}
+      EXPO_PUBLIC_HUIGE_TEXT_MODEL: ${{ secrets.EXPO_PUBLIC_HUIGE_TEXT_MODEL }}
+      EXPO_PUBLIC_HUIGE_PROMPT_PLAZA_URL: ${{ secrets.EXPO_PUBLIC_HUIGE_PROMPT_PLAZA_URL }}
 
     steps:
       - name: Checkout

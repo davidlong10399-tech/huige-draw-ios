@@ -1,24 +1,20 @@
 @echo off
 chcp 65001 >nul
-set PATH=C:\Program Files\AutoClaw\resources\node;%PATH%
-set EAS_NO_VCS=1
-set EAS_PROJECT_ROOT=F:\Lenovo\ai-studio-ios
-cd /d F:\Lenovo\ai-studio-ios
+cd /d F:\Lenovo\huige-draw-ios
 echo.
-echo ===== Huige Draw iOS IPA Build =====
-echo Expo account should be: liudaye
-echo If Apple ID / 2FA / certificates are requested, enter them in this window.
-echo Do NOT paste passwords into chat.
+echo ===== Huige Draw unsigned iOS IPA build =====
+echo This triggers GitHub Actions on macOS and uploads huige-draw-unsigned.ipa.
 echo.
-npx eas-cli whoami
+gh auth status
 if errorlevel 1 (
   echo.
-  echo Not logged in. Running login...
-  npx eas-cli login
+  echo GitHub CLI is not logged in. Run: gh auth login
+  pause
+  exit /b 1
 )
+gh workflow run build-unsigned-ios.yml --ref main
+timeout /t 5 /nobreak >nul
+gh run list --workflow build-unsigned-ios.yml --limit 1
 echo.
-echo Starting iOS preview build...
-npx eas-cli build --platform ios --profile preview
-echo.
-echo If build succeeds, EAS will print a download URL for the .ipa.
+echo Open the run above, then download artifact: huige-draw-unsigned-ipa
 pause

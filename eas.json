@@ -5,12 +5,14 @@
   },
   "build": {
     "preview": {
+      "environment": "preview",
       "distribution": "internal",
       "ios": {
         "simulator": false
       }
     },
     "production": {
+      "environment": "production",
       "ios": {
         "simulator": false
       }

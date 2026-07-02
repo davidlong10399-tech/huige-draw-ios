@@ -16,16 +16,23 @@ const HEALTH_TIMEOUT_MS = 20_000;
 
 async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<Response> {
   const controller = new AbortController();
+  const externalSignal = options.signal;
+  const { signal: _signal, ...fetchOptions } = options;
+  const abortFromExternal = () => controller.abort();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  if (externalSignal?.aborted) controller.abort();
+  else externalSignal?.addEventListener('abort', abortFromExternal);
   try {
-    return await fetch(url, { ...options, signal: controller.signal });
+    return await fetch(url, { ...fetchOptions, signal: controller.signal });
   } catch (e: any) {
     if (e?.name === 'AbortError') {
+      if (externalSignal?.aborted) throw new Error('已取消生成。cancelled');
       throw new Error(`请求超时（已等待 ${Math.round(timeoutMs / 1000)} 秒），请检查本地服务或稍后重试。timeout`);
     }
     throw e;
   } finally {
     clearTimeout(timer);
+    externalSignal?.removeEventListener('abort', abortFromExternal);
   }
 }
 
@@ -131,12 +138,13 @@ function contentText(value: any): string {
   return '';
 }
 
-async function apiPost(config: DirectApiConfig, path: string, body: unknown): Promise<Json> {
+async function apiPost(config: DirectApiConfig, path: string, body: unknown, signal?: AbortSignal): Promise<Json> {
   const baseUrl = normalizeBaseUrl(config.apiBase);
   const res = await fetchWithTimeout(`${baseUrl}${path}`, {
     method: 'POST',
     headers: headersFor(config),
     body: JSON.stringify(body),
+    signal,
   });
   const text = await res.text();
   let json: any = {};
@@ -409,7 +417,7 @@ export async function askAssistant(config: DirectApiConfig, payload: { prompt: s
   return { message, chips, model: config.assistantModel };
 }
 
-export async function generateImage(config: DirectApiConfig, payload: { prompt: string; size: string; resolution?: string }) {
+export async function generateImage(config: DirectApiConfig, payload: { prompt: string; size: string; resolution?: string; signal?: AbortSignal }) {
   const baseUrl = normalizeBaseUrl(config.apiBase);
   const px = sizeValue(payload.size, payload.resolution);
   const attempts = [
@@ -419,7 +427,7 @@ export async function generateImage(config: DirectApiConfig, payload: { prompt: 
   let lastErr = '';
   for (const attempt of attempts) {
     try {
-      const data = await apiPost(config, attempt.path, attempt.body);
+      const data = await apiPost(config, attempt.path, attempt.body, payload.signal);
       (data as any).baseUrl = baseUrl;
       return assertImageResult(data);
     } catch (e: any) {
@@ -430,7 +438,7 @@ export async function generateImage(config: DirectApiConfig, payload: { prompt: 
   throw new Error(lastErr || 'Generate API failed');
 }
 
-export async function editImage(config: DirectApiConfig, payload: { prompt: string; size: string; images: RefImage[]; resolution?: string }) {
+export async function editImage(config: DirectApiConfig, payload: { prompt: string; size: string; images: RefImage[]; resolution?: string; signal?: AbortSignal }) {
   if (!payload.images?.length) throw new Error('参考图编辑需要先上传图片');
   const baseUrl = normalizeBaseUrl(config.apiBase);
   let lastErr = '';
@@ -445,7 +453,7 @@ export async function editImage(config: DirectApiConfig, payload: { prompt: stri
       form.append('image', { uri: img.uri, name: img.name || `ref-${i + 1}.png`, type: img.mimeType || 'image/png' } as any);
     });
     try {
-      const res = await fetchWithTimeout(`${baseUrl}${ep}`, { method: 'POST', headers: config.apiKey?.trim() ? { Authorization: `Bearer ${config.apiKey.trim()}` } : undefined, body: form });
+      const res = await fetchWithTimeout(`${baseUrl}${ep}`, { method: 'POST', headers: config.apiKey?.trim() ? { Authorization: `Bearer ${config.apiKey.trim()}` } : undefined, body: form, signal: payload.signal });
       const text = await res.text();
       let json: any = {};
       try { json = text ? JSON.parse(text) : {}; } catch { json = { raw: text }; }

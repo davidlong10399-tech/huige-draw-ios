@@ -9,6 +9,7 @@ import {
   Alert,
   Image,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -17,6 +18,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
@@ -42,8 +44,10 @@ import {
   RefImage,
 } from "./src/lib/api";
 
+declare const process: { env: Record<string, string | undefined> };
+
 type Mode = "generate" | "edit";
-type Tab = "create" | "gallery" | "settings";
+type Tab = "create" | "gallery" | "profile";
 type SavedConfig = {
   imageApiBase?: string;
   imageApiKey?: string;
@@ -55,12 +59,31 @@ type SavedConfig = {
   apiBase?: string;
   apiKey?: string;
   assistantModel?: string;
+  promptPlazaUrl?: string;
 };
 
 const CONFIG_KEY = "huige-draw-direct-config-v4";
 const LEGACY_CONFIG_KEY = "huige-draw-direct-config-v3";
 const HISTORY_KEY = "huige-draw-history-v3";
 const MAX_HISTORY = 50;
+const DEFAULT_DIRECT_API_BASE =
+  process.env.EXPO_PUBLIC_HUIGE_API_BASE || "https://ai.beehears.com/v1";
+const DEFAULT_DIRECT_API_KEY = process.env.EXPO_PUBLIC_HUIGE_API_KEY || "";
+const DEFAULT_IMAGE_API_BASE =
+  process.env.EXPO_PUBLIC_HUIGE_IMAGE_API_BASE || DEFAULT_DIRECT_API_BASE;
+const DEFAULT_IMAGE_API_KEY =
+  process.env.EXPO_PUBLIC_HUIGE_IMAGE_API_KEY || DEFAULT_DIRECT_API_KEY;
+const DEFAULT_TEXT_API_BASE =
+  process.env.EXPO_PUBLIC_HUIGE_TEXT_API_BASE || DEFAULT_DIRECT_API_BASE;
+const DEFAULT_TEXT_API_KEY =
+  process.env.EXPO_PUBLIC_HUIGE_TEXT_API_KEY || DEFAULT_DIRECT_API_KEY;
+const DEFAULT_IMAGE_MODEL_VALUE =
+  process.env.EXPO_PUBLIC_HUIGE_IMAGE_MODEL || DEFAULT_IMAGE_MODEL;
+const DEFAULT_TEXT_MODEL_VALUE =
+  process.env.EXPO_PUBLIC_HUIGE_TEXT_MODEL || DEFAULT_ASSISTANT_MODEL;
+const DEFAULT_PROMPT_PLAZA_URL =
+  process.env.EXPO_PUBLIC_HUIGE_PROMPT_PLAZA_URL ||
+  "https://evolink.ai/zh/gpt-image-2-prompts";
 const stylesList = [
   "商业海报",
   "真实自拍",
@@ -80,11 +103,114 @@ const stylePrompts: Record<string, string> = {
   赛博朋克: "雨夜霓虹，赛博朋克城市，湿润地面反光，高细节",
 };
 
+const styleShowcase = [
+  {
+    name: "商业海报",
+    title: "商业",
+    sub: "主图广告",
+    icon: "storefront-outline",
+    accent: "#F6C96D",
+  },
+  {
+    name: "真实自拍",
+    title: "自拍",
+    sub: "生活质感",
+    icon: "camera-outline",
+    accent: "#A78BFA",
+  },
+  {
+    name: "电影感",
+    title: "电影",
+    sub: "光影叙事",
+    icon: "film-outline",
+    accent: "#60A5FA",
+  },
+  {
+    name: "真实摄影",
+    title: "摄影",
+    sub: "自然真实",
+    icon: "aperture-outline",
+    accent: "#5EEAD4",
+  },
+  {
+    name: "国潮",
+    title: "国潮",
+    sub: "东方纹样",
+    icon: "color-palette-outline",
+    accent: "#FB7185",
+  },
+  {
+    name: "产品摄影",
+    title: "产品",
+    sub: "棚拍质感",
+    icon: "cube-outline",
+    accent: "#93C5FD",
+  },
+  {
+    name: "赛博朋克",
+    title: "赛博",
+    sub: "霓虹未来",
+    icon: "flash-outline",
+    accent: "#C084FC",
+  },
+] as const;
+
+const promptPlaza = [
+  {
+    tag: "电商",
+    title: "618 高级产品主图",
+    prompt:
+      "一张 618 足浴盆电商主图，白色产品置于明亮浴室环境，干净高级，暖色灯光，商业摄影质感，主体突出，背景整洁，适合手机端详情页首图。",
+    style: "商业海报",
+  },
+  {
+    tag: "真实",
+    title: "朋友圈真实自拍",
+    prompt:
+      "真实手机自拍照，前置摄像头视角，自然肤质，生活化室内光线，人物轻松自然，背景略微虚化，随手抓拍但构图舒服。",
+    style: "真实自拍",
+  },
+  {
+    tag: "海报",
+    title: "电影感活动海报",
+    prompt:
+      "电影感活动主视觉海报，主体居中，戏剧化侧逆光，深色背景，高级质感，文字区域留白，画面有强烈层次和商业大片氛围。",
+    style: "电影感",
+  },
+  {
+    tag: "空间",
+    title: "高级浴室空间图",
+    prompt:
+      "现代明亮浴室空间，浅色瓷砖，干净台面，柔和自然光，产品融入真实使用场景，画面高级、整洁、温暖，真实摄影质感。",
+    style: "真实摄影",
+  },
+  {
+    tag: "潮流",
+    title: "霓虹赛博场景",
+    prompt:
+      "雨夜霓虹城市街头，湿润地面反光，赛博朋克氛围，主体被青紫色灯光勾勒，高细节，高对比，电影镜头感。",
+    style: "赛博朋克",
+  },
+];
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 function makeId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function nonEmpty(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function sameBaseUrl(a: string, b: string) {
+  return a.trim().replace(/\/v1\/?$/, "").replace(/\/$/, "") ===
+    b.trim().replace(/\/v1\/?$/, "").replace(/\/$/, "");
+}
+
+function shouldReplaceOldDefaultBase(savedBase: string, savedKey: string) {
+  return !savedBase || (!savedKey && sameBaseUrl(savedBase, DEFAULT_API_BASE));
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer) {
@@ -168,16 +294,26 @@ async function filterExistingResults(items: GenerateResult[]) {
 }
 
 export default function App() {
+  const { width: viewportWidth } = useWindowDimensions();
+  const pageWidth = Math.max(
+    280,
+    Math.min(viewportWidth - (Platform.OS === "web" ? 120 : 40), 520),
+  );
+  const pageLeft = 20;
   const [hydrated, setHydrated] = useState(false);
-  const [imageApiBase, setImageApiBase] = useState(DEFAULT_API_BASE);
-  const [imageApiKey, setImageApiKey] = useState("");
-  const [imageModel, setImageModel] = useState(DEFAULT_IMAGE_MODEL);
-  const [textApiBase, setTextApiBase] = useState(DEFAULT_API_BASE);
-  const [textApiKey, setTextApiKey] = useState("");
-  const [textModel, setTextModel] = useState(DEFAULT_ASSISTANT_MODEL);
+  const [imageApiBase, setImageApiBase] = useState(DEFAULT_IMAGE_API_BASE);
+  const [imageApiKey, setImageApiKey] = useState(DEFAULT_IMAGE_API_KEY);
+  const [imageModel, setImageModel] = useState(DEFAULT_IMAGE_MODEL_VALUE);
+  const [textApiBase, setTextApiBase] = useState(DEFAULT_TEXT_API_BASE);
+  const [textApiKey, setTextApiKey] = useState(DEFAULT_TEXT_API_KEY);
+  const [textModel, setTextModel] = useState(DEFAULT_TEXT_MODEL_VALUE);
+  const [promptPlazaUrl, setPromptPlazaUrl] = useState(
+    DEFAULT_PROMPT_PLAZA_URL,
+  );
   const [showSettings, setShowSettings] = useState(false);
   const [expandedImageSettings, setExpandedImageSettings] = useState(false);
   const [expandedTextSettings, setExpandedTextSettings] = useState(false);
+  const [expandedPlazaSettings, setExpandedPlazaSettings] = useState(false);
   const settingsLayoutInitialized = useRef(false);
   const [tab, setTab] = useState<Tab>("create");
   const [connected, setConnected] = useState("请填写 API Key 后测试连接");
@@ -196,7 +332,10 @@ export default function App() {
   const [assistantChips, setAssistantChips] = useState<string[]>([]);
   const [results, setResults] = useState<GenerateResult[]>([]);
   const [selected, setSelected] = useState<GenerateResult | null>(null);
+  const [showPromptPlaza, setShowPromptPlaza] = useState(false);
+  const [galleryFilter, setGalleryFilter] = useState<"all" | "recent" | "fast">("all");
   const progressTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const generateAbortRef = useRef<AbortController | null>(null);
 
   const imageConfig: DirectApiConfig = useMemo(
     () => ({
@@ -233,6 +372,20 @@ export default function App() {
     !!imageApiBase.trim() && !!imageApiKey.trim() && !!imageModel.trim();
   const textConfigured =
     !!textApiBase.trim() && !!textApiKey.trim() && !!textModel.trim();
+  const imageConfigSummary = imageConfigured
+    ? `${imageApiBase.replace(/^https?:\/\//, "")} · ${imageModel} · ${maskedImageKey}`
+    : "文生图 / 以图改图，待配置";
+  const textConfigSummary = textConfigured
+    ? `${textApiBase.replace(/^https?:\/\//, "")} · ${textModel} · ${maskedTextKey}`
+    : "AI 提示词优化，待配置";
+  const galleryResults = useMemo(() => {
+    if (galleryFilter === "recent") return results.slice(0, 12);
+    if (galleryFilter === "fast") {
+      return results.filter((r) => (r.elapsed || 0) > 0 && (r.elapsed || 999) <= 30);
+    }
+    return results;
+  }, [galleryFilter, results]);
+  const latestResult = results[0];
   useKeepAwake(activeTask ? "huaren-active-task" : undefined);
 
   useEffect(() => {
@@ -244,20 +397,29 @@ export default function App() {
           (await AsyncStorage.getItem(LEGACY_CONFIG_KEY));
         if (saved && alive) {
           const c = JSON.parse(saved) as SavedConfig;
-          const legacyBase = c.apiBase || DEFAULT_API_BASE;
-          const legacyKey = typeof c.apiKey === "string" ? c.apiKey : "";
-          setImageApiBase(c.imageApiBase || legacyBase);
-          setImageApiKey(
-            typeof c.imageApiKey === "string" ? c.imageApiKey : legacyKey,
+          const legacyBase = nonEmpty(c.apiBase);
+          const legacyKey = nonEmpty(c.apiKey);
+          const savedImageBase = nonEmpty(c.imageApiBase) || legacyBase;
+          const savedImageKey = nonEmpty(c.imageApiKey) || legacyKey;
+          const savedTextBase = nonEmpty(c.textApiBase) || legacyBase;
+          const savedTextKey = nonEmpty(c.textApiKey) || legacyKey;
+          setImageApiBase(
+            shouldReplaceOldDefaultBase(savedImageBase, savedImageKey)
+              ? DEFAULT_IMAGE_API_BASE
+              : savedImageBase,
           );
-          setImageModel(c.imageModel || DEFAULT_IMAGE_MODEL);
-          setTextApiBase(c.textApiBase || legacyBase);
-          setTextApiKey(
-            typeof c.textApiKey === "string" ? c.textApiKey : legacyKey,
+          setImageApiKey(savedImageKey || DEFAULT_IMAGE_API_KEY);
+          setImageModel(c.imageModel || DEFAULT_IMAGE_MODEL_VALUE);
+          setTextApiBase(
+            shouldReplaceOldDefaultBase(savedTextBase, savedTextKey)
+              ? DEFAULT_TEXT_API_BASE
+              : savedTextBase,
           );
+          setTextApiKey(savedTextKey || DEFAULT_TEXT_API_KEY);
           setTextModel(
-            c.textModel || c.assistantModel || DEFAULT_ASSISTANT_MODEL,
+            c.textModel || c.assistantModel || DEFAULT_TEXT_MODEL_VALUE,
           );
+          setPromptPlazaUrl(c.promptPlazaUrl || DEFAULT_PROMPT_PLAZA_URL);
           setShowSettings(c.showSettings ?? false);
         }
         const h = await AsyncStorage.getItem(HISTORY_KEY);
@@ -280,7 +442,7 @@ export default function App() {
     if (!hydrated || settingsLayoutInitialized.current) return;
     settingsLayoutInitialized.current = true;
     setExpandedImageSettings(!imageConfigured);
-    setExpandedTextSettings(!textConfigured);
+    setExpandedTextSettings(imageConfigured && !textConfigured);
   }, [hydrated, imageConfigured, textConfigured]);
 
   useEffect(() => {
@@ -294,6 +456,7 @@ export default function App() {
         textApiBase,
         textApiKey,
         textModel,
+        promptPlazaUrl,
         showSettings,
       }),
     ).catch(() => {});
@@ -305,6 +468,7 @@ export default function App() {
     textApiBase,
     textApiKey,
     textModel,
+    promptPlazaUrl,
     showSettings,
   ]);
 
@@ -319,6 +483,7 @@ export default function App() {
   useEffect(
     () => () => {
       if (progressTimer.current) clearInterval(progressTimer.current);
+      generateAbortRef.current?.abort();
     },
     [],
   );
@@ -450,6 +615,27 @@ export default function App() {
     });
   }
 
+  function applyPromptPreset(item: (typeof promptPlaza)[number]) {
+    setPrompt(item.prompt);
+    if (item.style) setStyle(item.style);
+    setShowPromptPlaza(false);
+    setTab("create");
+  }
+
+  async function openPromptPlazaUrl() {
+    const url = promptPlazaUrl.trim();
+    if (!url) return Alert.alert("未配置提示词广场", "可以先使用内置精选，也可以在设置里填外部提示词广场地址。");
+    const canOpen = await Linking.canOpenURL(url).catch(() => false);
+    if (!canOpen) return Alert.alert("无法打开", "请检查提示词广场地址是否正确。");
+    await Linking.openURL(url);
+  }
+
+  function cancelGenerate() {
+    if (!generating) return;
+    generateAbortRef.current?.abort();
+    setProgressText("正在取消生成...");
+  }
+
   async function runGenerate() {
     if (!imageApiKey.trim())
       return Alert.alert("缺少生图 API Key", "请先在设置里填写生图 API Key。");
@@ -459,6 +645,8 @@ export default function App() {
         "缺少参考图",
         '以图改图必须先上传参考图。请先点"上传参考图"，或切回"文生图"。',
       );
+    const controller = new AbortController();
+    generateAbortRef.current = controller;
     setGenerating(true);
     startProgress(mode === "edit" ? "正在以图改图" : "正在生成图片");
     try {
@@ -470,8 +658,9 @@ export default function App() {
               size,
               resolution,
               images: refs,
+              signal: controller.signal,
             })
-          : await generateImage(imageConfig, { prompt: fullPrompt, size, resolution });
+          : await generateImage(imageConfig, { prompt: fullPrompt, size, resolution, signal: controller.signal });
       const item: GenerateResult = {
         ...raw,
         id: makeId(),
@@ -493,8 +682,13 @@ export default function App() {
       setSelected(saved);
     } catch (e: any) {
       stopProgress();
-      Alert.alert("生成失败", friendlyErrorMessage(e));
+      if (/cancelled|已取消生成/.test(e?.message || String(e))) {
+        setProgressText("");
+      } else {
+        Alert.alert("生成失败", friendlyErrorMessage(e));
+      }
     } finally {
+      if (generateAbortRef.current === controller) generateAbortRef.current = null;
       setGenerating(false);
     }
   }
@@ -563,14 +757,17 @@ export default function App() {
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
         >
+          <View style={[styles.pageFrame, { width: pageWidth }]}>
           <View style={styles.top}>
             <View>
-              <Text style={styles.brand}>画刃</Text>
+              <Text style={styles.brand}>
+                {tab === "create" ? "画刃" : tab === "gallery" ? "作品" : "设置"}
+              </Text>
               <Text style={styles.brandSub}>
-                快速生成 · 快速改图 · 快速沉淀
+                {tab === "create" ? "移动 AI 图像工作台" : tab === "gallery" ? "复用、保存和继续改图" : "接口、模型和偏好"}
               </Text>
             </View>
-            <Pressable style={styles.pill} onPress={() => setTab("settings")}>
+            <Pressable style={styles.pill} onPress={() => setTab("profile")}>
               <View
                 style={[
                   styles.dot,
@@ -590,26 +787,44 @@ export default function App() {
           </View>
           {tab === "create" && (
             <>
-              <View style={styles.modebar}>
+              <View style={styles.studioHero}>
+                <View style={styles.logoMark}>
+                  <View style={styles.logoRing} />
+                  <Ionicons name="sparkles" size={18} color="#F4F7F2" />
+                </View>
+                <View style={styles.studioCopy}>
+                  <Text style={styles.studioKicker}>HUAREN AI</Text>
+                  <Text style={styles.studioTitle}>
+                    AI 创造 · 无限想象
+                  </Text>
+                  <Text style={styles.studioSub}>
+                    {mode === "generate" ? "输入想象，选择风格，一键生成你的视觉作品。" : "用参考图延展构图、光影和商业质感。"}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.modeSwitch}>
                 {(["generate", "edit"] as Mode[]).map((m) => (
                   <Pressable
                     key={m}
-                    style={[styles.mode, m === mode && styles.modeActive]}
+                    style={[styles.modePill, m === mode && styles.modePillActive]}
                     onPress={() => setMode(m)}
                   >
-                    <Text
-                      style={
-                        m === mode ? styles.modeTextActive : styles.modeText
-                      }
-                    >
-                      {m === "generate" ? "文生图" : "以图改图"}
+                    <Ionicons name={m === "generate" ? "text-outline" : "image-outline"} size={16} color={m === mode ? C.bg : "rgba(237,239,247,.56)"} />
+                    <Text style={m === mode ? styles.modePillTextActive : styles.modePillText}>
+                      {m === "generate" ? "文生图" : "参考图"}
                     </Text>
                   </Pressable>
                 ))}
               </View>
-              <View style={styles.promptCard}>
+
+              <View style={styles.composerCard}>
+                <View style={styles.composerAura} pointerEvents="none" />
                 <View style={styles.promptHead}>
-                  <Text style={styles.promptLabel}>PROMPT</Text>
+                  <View style={styles.promptCopy}>
+                    <Text style={styles.promptLabel}>描述你的想象</Text>
+                    <Text style={styles.promptHint}>AI 会为你创建独一无二的作品</Text>
+                  </View>
                   <View style={styles.headActions}>
                     <Pressable
                       style={styles.magic}
@@ -634,7 +849,7 @@ export default function App() {
                   </View>
                 </View>
                 <TextInput
-                  style={styles.promptInput}
+                  style={styles.promptInputDock}
                   multiline
                   placeholder="一张 618 足浴盆电商主图，白色产品置于明亮浴室环境，干净高级，暖色灯光，商业摄影质感。"
                   placeholderTextColor="rgba(247,249,255,.45)"
@@ -642,138 +857,167 @@ export default function App() {
                   onChangeText={setPrompt}
                   editable={!generating && !optimizing}
                 />
-              </View>
-              {!!assistantMsg && (
-                <View style={styles.assistCard}>
-                  <View style={styles.assistHead}>
-                    <Ionicons name="sparkles" size={14} color="#bfe9ff" />
-                    <Text style={styles.assistTitle}>创作助手</Text>
-                    <Pressable
-                      hitSlop={10}
-                      onPress={() => {
-                        setAssistantMsg("");
-                        setAssistantChips([]);
-                      }}
-                    >
-                      <Ionicons name="close" size={16} color={C.muted} />
-                    </Pressable>
-                  </View>
-                  <Text style={styles.assistMsg}>{assistantMsg}</Text>
-                  {!!assistantChips.length && (
-                    <View style={styles.assistChips}>
-                      {assistantChips.map((c, i) => (
-                        <Pressable
-                          key={i}
-                          style={styles.assistChip}
-                          onPress={() => applyChip(c)}
-                        >
-                          <Text style={styles.assistChipText}>＋ {c}</Text>
-                        </Pressable>
-                      ))}
+
+                {!!assistantMsg && (
+                  <View style={styles.assistCard}>
+                    <View style={styles.assistHead}>
+                      <Ionicons name="sparkles" size={14} color={C.purple} />
+                      <Text style={styles.assistTitle}>创作助手</Text>
+                      <Pressable
+                        hitSlop={10}
+                        onPress={() => {
+                          setAssistantMsg("");
+                          setAssistantChips([]);
+                        }}
+                      >
+                        <Ionicons name="close" size={16} color={C.muted} />
+                      </Pressable>
                     </View>
-                  )}
-                </View>
-              )}
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.chipRow}
-              >
-                {["自动比例", "1:1", "9:16", "16:9"].map((s) => {
-                  const active =
-                    (s === "自动比例" && size === "1:1") || size === s;
-                  return (
-                    <Pressable
-                      key={s}
-                      style={[styles.chip, active && styles.chipActive]}
-                      onPress={() => setSize(s === "自动比例" ? "1:1" : s)}
-                    >
-                      <Text
-                        style={active ? styles.chipTextActive : styles.chipText}
-                      >
-                        {s}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.chipRow}
-              >
-                {[
-                  { key: "std", label: "标准" },
-                  { key: "2k", label: "2K 高清" },
-                  { key: "4k", label: "4K 超清" },
-                ].map((r) => {
-                  const active = resolution === r.key;
-                  return (
-                    <Pressable
-                      key={r.key}
-                      style={[styles.chip, active && styles.chipActive]}
-                      onPress={() => setResolution(r.key)}
-                    >
-                      <Text
-                        style={active ? styles.chipTextActive : styles.chipText}
-                      >
-                        {r.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.chipRow}
-              >
-                {stylesList.map((s) => (
-                  <Pressable
-                    key={s}
-                    style={[styles.chip, style === s && styles.chipActive]}
-                    onPress={() => setStyle(s)}
-                  >
-                    <Text
-                      style={
-                        style === s ? styles.chipTextActive : styles.chipText
-                      }
-                    >
-                      {s}
-                    </Text>
-                  </Pressable>
-                ))}
-              </ScrollView>
-              <View style={styles.tools}>
-                <Pressable style={styles.tool} onPress={pickImages}>
-                  <Ionicons name="image-outline" size={22} color="#fff" />
-                  <Text style={styles.toolText}>
-                    {refs.length ? "参考图 " + refs.length + " 张" : "上传参考图"}
-                  </Text>
-                </Pressable>
+                    <Text style={styles.assistMsg}>{assistantMsg}</Text>
+                    {!!assistantChips.length && (
+                      <View style={styles.assistChips}>
+                        {assistantChips.map((c, i) => (
+                          <Pressable
+                            key={i}
+                            style={styles.assistChip}
+                            onPress={() => applyChip(c)}
+                          >
+                            <Text style={styles.assistChipText}>＋ {c}</Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+                )}
+
                 <Pressable
-                  style={[styles.tool, !prompt && styles.disabled]}
-                  onPress={() => setPrompt("")}
-                  disabled={!prompt}
+                  style={[
+                    styles.inlinePrimary,
+                    generating && styles.cancelPrimary,
+                    !generating && generateDisabled && styles.inlinePrimaryOff,
+                  ]}
+                  onPress={generating ? cancelGenerate : runGenerate}
+                  disabled={!generating && generateDisabled}
                 >
-                  <Ionicons name="backspace-outline" size={22} color="#fff" />
-                  <Text style={styles.toolText}>清空提示词</Text>
+                  <Text
+                    style={[
+                      styles.inlinePrimaryText,
+                      !generating && generateDisabled && styles.inlinePrimaryTextOff,
+                    ]}
+                  >
+                    {!hydrated
+                      ? "正在恢复数据..."
+                      : generating
+                        ? "取消生成"
+                        : editBlocked
+                          ? "请先上传参考图"
+                          : "开始创作"}
+                  </Text>
+                  <Ionicons
+                    name={generating ? "close" : "sparkles"}
+                    size={18}
+                    color={!generating && generateDisabled ? "rgba(237,239,247,.45)" : C.bg}
+                  />
                 </Pressable>
               </View>
-              {!!refs.length && (
-                <View style={styles.refStrip}>
-                  {refs.map((r, i) => (
+
+              <View style={styles.sectionHeadTight}>
+                <Text style={styles.sectionTitle}>选择风格</Text>
+                <Pressable onPress={() => setShowPromptPlaza(true)}>
+                  <Text style={styles.sectionLink}>查看全部</Text>
+                </Pressable>
+              </View>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.styleShowcaseRow}>
+                {styleShowcase.map((item) => {
+                  const active = style === item.name;
+                  return (
                     <Pressable
-                      key={i}
-                      onPress={() =>
-                        setRefs(refs.filter((_, idx) => idx !== i))
-                      }
+                      key={item.name}
+                      style={[styles.styleShowcaseCard, active && styles.styleShowcaseActive]}
+                      onPress={() => setStyle(item.name)}
                     >
-                      <Image source={{ uri: r.uri }} style={styles.refThumb} />
+                      <View style={[styles.styleShowcaseIcon, { backgroundColor: `${item.accent}26`, borderColor: `${item.accent}55` }]}>
+                        <Ionicons name={item.icon as keyof typeof Ionicons.glyphMap} size={18} color={item.accent} />
+                      </View>
+                      <Text style={styles.styleShowcaseTitle}>{item.title}</Text>
+                      <Text style={styles.styleShowcaseSub}>{item.sub}</Text>
                     </Pressable>
-                  ))}
+                  );
+                })}
+              </ScrollView>
+
+              <View style={styles.toolPanel}>
+                <Text style={styles.sectionTitle}>创作工具</Text>
+                <View style={styles.toolGrid}>
+                  <Pressable style={styles.toolBox} onPress={() => setShowPromptPlaza(true)}>
+                    <Ionicons name="albums-outline" size={18} color={C.purple} />
+                    <Text style={styles.toolBoxText}>提示词</Text>
+                  </Pressable>
+                  <Pressable style={styles.toolBox} onPress={pickImages}>
+                    <Ionicons name="image-outline" size={18} color={C.purple} />
+                    <Text style={styles.toolBoxText}>{refs.length ? `参考 ${refs.length}/4` : "参考图"}</Text>
+                  </Pressable>
+                  <Pressable style={styles.toolBox} onPress={runAssistant} disabled={assisting || optimizing}>
+                    <Ionicons name="bulb-outline" size={18} color={C.purple} />
+                    <Text style={styles.toolBoxText}>{assisting ? "思考中" : "灵感"}</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.toolBox, !prompt && styles.disabled]}
+                    onPress={() => setPrompt("")}
+                    disabled={!prompt}
+                  >
+                    <Ionicons name="backspace-outline" size={18} color={C.purple} />
+                    <Text style={styles.toolBoxText}>清空</Text>
+                  </Pressable>
                 </View>
+
+                <View style={styles.toolRail}>
+                  <Text style={styles.railLabel}>清晰度</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.optionRow}>
+                    {[
+                      { key: "std", label: "标准" },
+                      { key: "2k", label: "2K" },
+                      { key: "4k", label: "4K" },
+                    ].map((r) => {
+                      const active = resolution === r.key;
+                      return (
+                        <Pressable
+                          key={r.key}
+                          style={[styles.miniChip, active && styles.miniChipActive]}
+                          onPress={() => setResolution(r.key)}
+                        >
+                          <Text style={active ? styles.miniChipTextActive : styles.miniChipText}>
+                            {r.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+
+                {!!refs.length && (
+                  <View style={styles.refStrip}>
+                    {refs.map((r, i) => (
+                      <Pressable
+                        key={i}
+                        style={styles.refWrap}
+                        onPress={() => setRefs(refs.filter((_, idx) => idx !== i))}
+                      >
+                        <Image source={{ uri: r.uri }} style={styles.refThumb} />
+                        <View style={styles.refRemove}><Ionicons name="close" size={12} color="#fff" /></View>
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
+
+              </View>
+
+              {editBlocked && (
+                <Text style={styles.warnText}>
+                  以图改图需要先上传参考图，否则不会请求接口。
+                </Text>
               )}
+
               {!!progress && (
                 <View style={styles.taskCard}>
                   <View style={styles.ring}>
@@ -788,6 +1032,10 @@ export default function App() {
                   <Text style={styles.taskSub}>
                     前台保持亮屏，完成后自动进入作品流。
                   </Text>
+                  <Pressable style={styles.cancelTaskButton} onPress={cancelGenerate}>
+                    <Ionicons name="close-circle-outline" size={18} color="#FFD7D2" />
+                    <Text style={styles.cancelTaskText}>取消生成</Text>
+                  </Pressable>
                   <View style={styles.progressTrack}>
                     <View
                       style={[
@@ -801,80 +1049,148 @@ export default function App() {
                   </View>
                 </View>
               )}
-              {editBlocked && (
-                <Text style={styles.warnText}>
-                  以图改图需要先上传参考图，否则不会请求接口。
-                </Text>
+
+              {latestResult ? (
+                <Pressable
+                  style={styles.canvasCard}
+                  onPress={() => setSelected(latestResult)}
+                >
+                  <Image
+                    source={{ uri: latestResult.localUri || latestResult.url }}
+                    style={styles.canvasImage}
+                  />
+                  <View style={styles.canvasTopbar}>
+                    <View style={styles.canvasBadge}>
+                      <Ionicons name="sparkles" size={13} color={C.bg} />
+                      <Text style={styles.canvasBadgeText}>最近作品</Text>
+                    </View>
+                    <Text style={styles.canvasMeta}>{size} · {resolution === "std" ? "标准" : resolution.toUpperCase()}</Text>
+                  </View>
+                  {mode === "edit" && !!refs.length && (
+                    <View style={styles.canvasRefs}>
+                      {refs.slice(0, 4).map((r, i) => (
+                        <Image key={i} source={{ uri: r.uri }} style={styles.canvasRefThumb} />
+                      ))}
+                    </View>
+                  )}
+                </Pressable>
+              ) : (
+                <View style={styles.inspirationCard}>
+                  <View style={styles.inspirationHead}>
+                    <View>
+                      <Text style={styles.inspirationKicker}>PROMPT PLAZA</Text>
+                      <Text style={styles.inspirationTitle}>提示词灵感库</Text>
+                    </View>
+                    <Pressable style={styles.inspirationAction} onPress={() => setShowPromptPlaza(true)}>
+                      <Ionicons name="albums-outline" size={16} color={C.bg} />
+                      <Text style={styles.inspirationActionText}>广场</Text>
+                    </Pressable>
+                  </View>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.seedRow}>
+                    {promptPlaza.slice(0, 3).map((item) => (
+                      <Pressable key={item.title} style={styles.seedCard} onPress={() => applyPromptPreset(item)}>
+                        <Text style={styles.seedTag}>{item.tag}</Text>
+                        <Text style={styles.seedTitle}>{item.title}</Text>
+                        <Text style={styles.seedSub} numberOfLines={2}>{item.prompt}</Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                </View>
               )}
             </>
           )}
           {tab === "gallery" && (
             <View>
-              <View style={styles.galleryHead}>
-                <Text style={styles.galleryTitle}>作品流</Text>
+              <View style={styles.galleryHero}>
+                <View>
+                  <Text style={styles.galleryHeroTitle}>创作资产库</Text>
+                  <Text style={styles.galleryHeroSub}>共 {results.length} 张作品，点击可预览或继续改图</Text>
+                </View>
                 {!!results.length && (
                   <Pressable style={styles.smallBtn} onPress={clearHistory}>
                     <Text style={styles.smallBtnText}>清空</Text>
                   </Pressable>
                 )}
               </View>
+              <View style={styles.filterRow}>
+                {([
+                  ["all", "全部"],
+                  ["recent", "最近"],
+                  ["fast", "快速"],
+                ] as [typeof galleryFilter, string][]).map(([key, label]) => {
+                  const active = galleryFilter === key;
+                  return (
+                    <Pressable
+                      key={key}
+                      style={[styles.filterChip, active && styles.filterChipActive]}
+                      onPress={() => setGalleryFilter(key)}
+                    >
+                      <Text style={active ? styles.filterTextActive : styles.filterText}>{label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
               {!results.length && (
-                <Text style={styles.emptyText}>
-                  {hydrated ? "暂无作品，先去创作一张吧" : "正在恢复作品流..."}
-                </Text>
+                <View style={styles.galleryEmpty}>
+                  <Ionicons name="images-outline" size={34} color="rgba(237,239,247,.38)" />
+                  <Text style={styles.galleryEmptyTitle}>{hydrated ? "还没有作品" : "正在恢复作品..."}</Text>
+                  <Text style={styles.galleryEmptySub}>去创作页生成第一张图，它会自动出现在这里。</Text>
+                </View>
+              )}
+              {!!results.length && !galleryResults.length && (
+                <View style={styles.galleryEmpty}>
+                  <Ionicons name="funnel-outline" size={30} color="rgba(237,239,247,.38)" />
+                  <Text style={styles.galleryEmptyTitle}>当前筛选没有作品</Text>
+                  <Text style={styles.galleryEmptySub}>切回「全部」查看完整作品流。</Text>
+                </View>
               )}
               <View style={styles.masonry}>
-                {results.map((r, i) => (
+                {galleryResults.map((r, i) => (
                   <Pressable
                     key={r.id || r.url + "-" + i}
                     style={[styles.tile, i % 3 === 1 && styles.tileTall]}
                     onPress={() => setSelected(r)}
                   >
-                    <Image
-                      source={{ uri: r.localUri || r.url }}
-                      style={styles.tileImg}
-                    />
+                    <Image source={{ uri: r.localUri || r.url }} style={styles.tileImg} />
                     <View style={styles.tileShade} />
-                    <Text style={styles.tileText}>
-                      {r.elapsed ? r.elapsed + "s" : "作品"}
-                    </Text>
-                    <Pressable
-                      style={styles.tileEdit}
-                      onPress={() => editAgain(r)}
-                    >
-                      <Ionicons
-                        name="create-outline"
-                        size={15}
-                        color="#10131a"
-                      />
+                    <View style={styles.tileMeta}>
+                      <Text style={styles.tileText}>{r.elapsed ? r.elapsed + "s" : "作品"}</Text>
+                      <Text style={styles.tileSub}>AI 生成</Text>
+                    </View>
+                    <Pressable style={styles.tileEdit} onPress={() => editAgain(r)}>
+                      <Ionicons name="create-outline" size={15} color="#fff" />
                     </Pressable>
                   </Pressable>
                 ))}
               </View>
             </View>
           )}
-          {tab === "settings" && (
+          {tab === "profile" && (
             <>
-              <View style={styles.statusStrip}>
-                <View>
-                  <Text style={styles.statusTitle}>接口配置</Text>
-                  <Text style={styles.statusSub}>{connected}</Text>
-                </View>
-                <Pressable style={styles.statusAction} onPress={checkHealth}>
-                  <Text style={styles.statusActionText}>测试</Text>
-                </Pressable>
-              </View>
               <View style={styles.settingsCard}>
+                <View style={styles.configHero}>
+                  <View>
+                    <Text style={styles.configKicker}>MY CONFIG</Text>
+                    <Text style={styles.configTitle}>我的配置</Text>
+                    <Text style={styles.configSub}>{connected}</Text>
+                  </View>
+                  <Pressable style={styles.statusAction} onPress={checkHealth}>
+                    <Text style={styles.statusActionText}>测试连接</Text>
+                  </Pressable>
+                </View>
+                <View style={styles.configStats}>
+                  <View style={styles.profileStat}><Text style={styles.profileStatNum}>{results.length}</Text><Text style={styles.profileStatLabel}>作品</Text></View>
+                  <View style={styles.profileStat}><Text style={styles.profileStatNum}>{imageConfigured ? "已连" : "待配"}</Text><Text style={styles.profileStatLabel}>生图</Text></View>
+                  <View style={styles.profileStat}><Text style={styles.profileStatNum}>{textConfigured ? "已连" : "待配"}</Text><Text style={styles.profileStatLabel}>文本</Text></View>
+                </View>
                 <Pressable
                   style={styles.settingsRow}
                   onPress={() => setExpandedImageSettings((v) => !v)}
                 >
-                  <View>
+                  <View style={styles.rowText}>
                     <Text style={styles.rowTitle}>生图接口</Text>
                     <Text style={styles.rowSub}>
-                      {imageConfigured
-                        ? imageModel + " · " + maskedImageKey
-                        : "文生图 / 以图改图，待配置"}
+                      {imageConfigSummary}
                     </Text>
                   </View>
                   <Text style={styles.editText}>
@@ -884,6 +1200,16 @@ export default function App() {
                 {expandedImageSettings && (
                   <View style={styles.settingsBody}>
                     <View style={styles.presets}>
+                      <Pressable
+                        style={styles.preset}
+                        onPress={() => {
+                          setImageApiBase(DEFAULT_IMAGE_API_BASE);
+                          setImageApiKey(DEFAULT_IMAGE_API_KEY);
+                          setImageModel(DEFAULT_IMAGE_MODEL_VALUE);
+                        }}
+                      >
+                        <Text style={styles.presetText}>BeeHears</Text>
+                      </Pressable>
                       <Pressable
                         style={styles.preset}
                         onPress={() =>
@@ -936,12 +1262,10 @@ export default function App() {
                   style={styles.settingsRow}
                   onPress={() => setExpandedTextSettings((v) => !v)}
                 >
-                  <View>
+                  <View style={styles.rowText}>
                     <Text style={styles.rowTitle}>文本接口</Text>
                     <Text style={styles.rowSub}>
-                      {textConfigured
-                        ? textModel + " · " + maskedTextKey
-                        : "AI 提示词优化，待配置"}
+                      {textConfigSummary}
                     </Text>
                   </View>
                   <Text style={styles.editText}>
@@ -951,6 +1275,16 @@ export default function App() {
                 {expandedTextSettings && (
                   <View style={styles.settingsBody}>
                     <View style={styles.presets}>
+                      <Pressable
+                        style={styles.preset}
+                        onPress={() => {
+                          setTextApiBase(DEFAULT_TEXT_API_BASE);
+                          setTextApiKey(DEFAULT_TEXT_API_KEY);
+                          setTextModel(DEFAULT_TEXT_MODEL_VALUE);
+                        }}
+                      >
+                        <Text style={styles.presetText}>BeeHears</Text>
+                      </Pressable>
                       <Pressable
                         style={styles.preset}
                         onPress={() =>
@@ -999,50 +1333,67 @@ export default function App() {
                     </View>
                   </View>
                 )}
+                <Pressable
+                  style={styles.settingsRow}
+                  onPress={() => setExpandedPlazaSettings((v) => !v)}
+                >
+                  <View style={styles.rowText}>
+                    <Text style={styles.rowTitle}>提示词广场</Text>
+                    <Text style={styles.rowSub}>
+                      {promptPlazaUrl.trim() ? promptPlazaUrl.trim() : "内置精选模板，可外接地址"}
+                    </Text>
+                  </View>
+                  <Text style={styles.editText}>
+                    {expandedPlazaSettings ? "收起" : "编辑"}
+                  </Text>
+                </Pressable>
+                {expandedPlazaSettings && (
+                  <View style={styles.settingsBody}>
+                    <View style={styles.field}>
+                      <Text style={styles.fieldLabel}>URL</Text>
+                      <TextInput
+                        style={styles.fieldInput}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        placeholder={DEFAULT_PROMPT_PLAZA_URL}
+                        placeholderTextColor="rgba(244,247,242,.34)"
+                        value={promptPlazaUrl}
+                        onChangeText={setPromptPlazaUrl}
+                      />
+                    </View>
+                    <Pressable style={styles.configAction} onPress={() => setShowPromptPlaza(true)}>
+                      <Ionicons name="albums-outline" size={17} color={C.bg} />
+                      <Text style={styles.configActionText}>打开提示词广场</Text>
+                    </Pressable>
+                  </View>
+                )}
               </View>
             </>
           )}
+          </View>
         </ScrollView>
-        {tab === "create" && (
-          <Pressable
-            style={[styles.primary, generateDisabled && styles.primaryOff]}
-            onPress={runGenerate}
-            disabled={generateDisabled}
-          >
-            <Text
-              style={[
-                styles.primaryText,
-                generateDisabled && styles.primaryTextOff,
-              ]}
-            >
-              {!hydrated
-                ? "正在恢复数据..."
-                : generating
-                  ? "生成中..."
-                  : editBlocked
-                    ? "请先上传参考图"
-                    : "开始生成"}
-            </Text>
-          </Pressable>
-        )}
-        <View style={styles.tabs}>
+        <View style={[styles.tabs, { left: pageLeft, width: pageWidth }]}>
           {(
             [
-              ["create", "创作"],
-              ["gallery", "作品"],
-              ["settings", "设置"],
-            ] as [Tab, string][]
-          ).map(([key, label]) => (
-            <Pressable
-              key={key}
-              style={[styles.tab, tab === key && styles.tabActive]}
-              onPress={() => setTab(key)}
-            >
-              <Text style={tab === key ? styles.tabTextActive : styles.tabText}>
-                {label}
-              </Text>
-            </Pressable>
-          ))}
+              ["create", "创作", "sparkles-outline"],
+              ["gallery", "画廊", "images-outline"],
+              ["profile", "设置", "sliders-outline"],
+            ] as [Tab, string, keyof typeof Ionicons.glyphMap][]
+          ).map(([key, label, icon]) => {
+            const active = tab === key;
+            return (
+              <Pressable
+                key={key}
+                style={[styles.tab, active && styles.tabActive]}
+                onPress={() => setTab(key)}
+              >
+                <Ionicons name={icon} size={20} color={active ? C.purple : "rgba(237,239,247,.50)"} />
+                <Text style={active ? styles.tabTextActive : styles.tabText}>
+                  {label}
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
         <Modal
           visible={!!selected}
@@ -1095,33 +1446,74 @@ export default function App() {
             )}
           </SafeAreaView>
         </Modal>
+        <Modal
+          visible={showPromptPlaza}
+          animationType="slide"
+          onRequestClose={() => setShowPromptPlaza(false)}
+        >
+          <SafeAreaView style={styles.modalSafe}>
+            <View style={styles.plazaModalHeader}>
+              <View>
+                <Text style={styles.plazaModalKicker}>PROMPT PLAZA</Text>
+                <Text style={styles.plazaModalTitle}>提示词广场</Text>
+              </View>
+              <Pressable style={styles.modalCloseSmall} onPress={() => setShowPromptPlaza(false)}>
+                <Ionicons name="close" size={22} color={C.ink} />
+              </Pressable>
+            </View>
+            <ScrollView contentContainerStyle={styles.plazaModalBody}>
+              <Pressable style={styles.externalPlazaCard} onPress={openPromptPlazaUrl}>
+                <View>
+                  <Text style={styles.externalPlazaTitle}>外接提示词广场</Text>
+                  <Text style={styles.externalPlazaSub}>
+                    {promptPlazaUrl.trim() || "在「我的配置」里填 URL 后可打开外部广场"}
+                  </Text>
+                </View>
+                <Ionicons name="open-outline" size={20} color={C.purple} />
+              </Pressable>
+              {promptPlaza.map((item) => (
+                <Pressable key={item.title} style={styles.plazaItem} onPress={() => applyPromptPreset(item)}>
+                  <View style={styles.plazaItemTop}>
+                    <Text style={styles.plazaItemTag}>{item.tag}</Text>
+                    <Text style={styles.plazaItemStyle}>{item.style}</Text>
+                  </View>
+                  <Text style={styles.plazaItemTitle}>{item.title}</Text>
+                  <Text style={styles.plazaItemPrompt}>{item.prompt}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </SafeAreaView>
+        </Modal>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const C = {
-  ink: "#f7f9ff",
-  muted: "rgba(247,249,255,.68)",
-  hair: "rgba(255,255,255,.26)",
-  hairSoft: "rgba(255,255,255,.13)",
-  glass: "rgba(255,255,255,.13)",
-  amber: "#ffd166",
-  green: "#66e0a3",
-  bg: "#08101b",
+  ink: "#F6F7FF",
+  muted: "rgba(226,232,255,.64)",
+  hair: "rgba(255,255,255,.14)",
+  hairSoft: "rgba(255,255,255,.08)",
+  glass: "rgba(15,22,42,.78)",
+  amber: "#8EA2FF",
+  purple: "#8B7CFF",
+  cyan: "#64D9FF",
+  violet: "#B18CFF",
+  green: "#4ADE80",
+  bg: "#060915",
 };
 const glass = {
   backgroundColor: C.glass,
   borderWidth: 1,
-  borderColor: C.hair,
+  borderColor: C.hairSoft,
   shadowColor: "#000",
-  shadowOpacity: 0.24,
-  shadowRadius: 28,
-  shadowOffset: { width: 0, height: 16 },
-  elevation: 8,
+  shadowOpacity: 0.22,
+  shadowRadius: 24,
+  shadowOffset: { width: 0, height: 10 },
+  elevation: 6,
 };
 const plain = {
-  backgroundColor: "rgba(255,255,255,.105)",
+  backgroundColor: "#10171F",
   borderWidth: 1,
   borderColor: C.hairSoft,
 };
@@ -1140,29 +1532,32 @@ const styles = StyleSheet.create({
     borderRadius: 130,
     opacity: 0.55,
   },
-  cyan: { left: -80, top: -54, backgroundColor: "rgba(131,232,255,.24)" },
-  amber: { right: -92, top: 88, backgroundColor: "rgba(255,209,102,.23)" },
-  orange: { right: -70, bottom: 52, backgroundColor: "rgba(255,122,48,.17)" },
+  cyan: { left: -80, top: -54, backgroundColor: "rgba(100,217,255,.18)" },
+  amber: { right: -92, top: 88, backgroundColor: "rgba(139,124,255,.16)" },
+  orange: { right: -70, bottom: 52, backgroundColor: "rgba(177,140,255,.13)" },
   sheen: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(255,255,255,.018)",
   },
   content: {
-    paddingTop: Platform.OS === "ios" ? 22 : 18,
-    paddingHorizontal: 18,
-    paddingBottom: 176,
+    paddingTop: Platform.OS === "ios" ? 10 : 10,
+    paddingHorizontal: 20,
+    paddingBottom: 230,
   },
+  pageFrame: { alignSelf: "flex-start" },
   top: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
-    marginBottom: 24,
+    marginBottom: 10,
   },
-  brand: { color: C.ink, fontSize: 25, lineHeight: 28, fontWeight: "900" },
-  brandSub: { color: C.muted, fontSize: 11, fontWeight: "800", marginTop: 6 },
+  brand: { color: C.ink, fontSize: 21, lineHeight: 27, fontWeight: "900", letterSpacing: 0 },
+  brandSub: { color: C.muted, fontSize: 12, fontWeight: "700", marginTop: 3 },
   pill: {
-    ...plain,
+    backgroundColor: "rgba(139,124,255,.12)",
+    borderWidth: 1,
+    borderColor: "rgba(142,162,255,.24)",
     height: 32,
     borderRadius: 999,
     paddingHorizontal: 11,
@@ -1174,41 +1569,603 @@ const styles = StyleSheet.create({
   dotOk: { backgroundColor: C.green },
   dotOff: { backgroundColor: "rgba(255,255,255,.32)" },
   pillText: { color: "rgba(255,255,255,.84)", fontSize: 11, fontWeight: "900" },
-  modebar: {
+
+  heroCard: {
+    backgroundColor: "#12152A",
+    borderWidth: 1,
+    borderColor: "rgba(120,220,202,.20)",
+    shadowColor: "#000",
+    shadowOpacity: 0.28,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 8,
+    borderRadius: 24,
+    padding: 18,
+    marginBottom: 14,
+  },
+  heroBadge: {
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: "rgba(120,220,202,.12)",
+    marginBottom: 14,
+  },
+  heroBadgeText: { color: C.purple, fontSize: 11, fontWeight: "900" },
+  heroTitle: { color: C.ink, fontSize: 26, lineHeight: 32, fontWeight: "800", letterSpacing: 0 },
+  heroSub: { color: C.muted, fontSize: 13, lineHeight: 21, fontWeight: "700", marginTop: 8, marginBottom: 18 },
+  heroButton: {
+    height: 48,
+    borderRadius: 16,
+    backgroundColor: C.amber,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  heroButtonText: { color: "#fff", fontSize: 15, fontWeight: "900" },
+  quickGrid: { flexDirection: "row", gap: 10, marginBottom: 18 },
+  quickCard: {
+    backgroundColor: "#1A1E36",
+    borderWidth: 1,
+    borderColor: C.hairSoft,
+    flex: 1,
+    minHeight: 112,
+    borderRadius: 18,
+    padding: 14,
+    justifyContent: "center",
+  },
+  quickTitle: { color: C.ink, fontSize: 15, fontWeight: "900", marginTop: 10 },
+  quickSub: { color: C.muted, fontSize: 11, lineHeight: 17, fontWeight: "800", marginTop: 4 },
+  sectionHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  sectionTitle: { color: C.ink, fontSize: 17, fontWeight: "900" },
+  sectionLink: { color: C.purple, fontSize: 12, fontWeight: "900" },
+  recentRow: { gap: 10, paddingRight: 18 },
+  recentCard: {
+    width: 126,
+    height: 160,
+    borderRadius: 22,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: C.hairSoft,
+    backgroundColor: "rgba(255,255,255,.08)",
+  },
+  recentImg: { width: "100%", height: "100%", position: "absolute" },
+  recentShade: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,.18)" },
+  recentText: { position: "absolute", left: 12, bottom: 12, color: "#fff", fontSize: 11, fontWeight: "900" },
+  emptyHome: {
     ...plain,
-    marginBottom: 16,
-    padding: 5,
+    height: 132,
+    borderRadius: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  emptyHomeText: { color: C.muted, fontSize: 13, fontWeight: "800" },
+
+  studioHero: {
+    minHeight: 88,
+    borderRadius: 22,
+    backgroundColor: "rgba(17,24,50,.78)",
+    borderWidth: 1,
+    borderColor: "rgba(142,162,255,.18)",
+    padding: 13,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 10,
+    overflow: "hidden",
+    shadowColor: "#8B7CFF",
+    shadowOpacity: 0.16,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 7,
+  },
+  logoMark: {
+    width: 48,
+    height: 48,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(139,124,255,.16)",
+    borderWidth: 1,
+    borderColor: "rgba(142,162,255,.36)",
+  },
+  logoRing: {
+    position: "absolute",
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: 2,
+    borderColor: "rgba(100,217,255,.34)",
+  },
+  studioCopy: { flex: 1, minWidth: 0 },
+  studioKicker: {
+    color: C.purple,
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 0,
+    marginBottom: 4,
+  },
+  studioTitle: {
+    color: C.ink,
+    fontSize: 19,
+    lineHeight: 24,
+    fontWeight: "900",
+    letterSpacing: 0,
+  },
+  studioSub: {
+    color: C.muted,
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: "700",
+    marginTop: 4,
+  },
+  modeSwitch: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 7,
+  },
+  modePill: {
+    width: "48.7%",
+    height: 40,
+    borderRadius: 15,
+    backgroundColor: "rgba(17,24,50,.76)",
+    borderWidth: 1,
+    borderColor: C.hairSoft,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+  },
+  modePillActive: {
+    backgroundColor: "rgba(142,162,255,.92)",
+    borderColor: "rgba(255,255,255,.22)",
+  },
+  modePillText: { color: C.muted, fontSize: 13, fontWeight: "900" },
+  modePillTextActive: { color: C.bg, fontSize: 13, fontWeight: "900" },
+  canvasCard: {
+    minHeight: 214,
+    borderRadius: 24,
+    backgroundColor: "#0E141B",
+    borderWidth: 1,
+    borderColor: "rgba(120,220,202,.18)",
+    overflow: "hidden",
+    marginBottom: 10,
+    shadowColor: "#000",
+    shadowOpacity: 0.32,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 14 },
+    elevation: 10,
+  },
+  canvasImage: {
+    width: "100%",
+    height: "100%",
+    position: "absolute",
+  },
+  canvasEmpty: {
+    minHeight: 214,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 28,
+  },
+  canvasAura: {
+    position: "absolute",
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    backgroundColor: "rgba(120,220,202,.10)",
+  },
+  canvasIcon: {
+    width: 58,
+    height: 58,
     borderRadius: 20,
+    backgroundColor: "rgba(120,220,202,.12)",
+    borderWidth: 1,
+    borderColor: "rgba(120,220,202,.24)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12,
+  },
+  canvasEmptyTitle: {
+    color: C.ink,
+    fontSize: 16,
+    fontWeight: "900",
+    textAlign: "center",
+  },
+  canvasEmptySub: {
+    color: C.muted,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: "700",
+    textAlign: "center",
+    marginTop: 7,
+  },
+  canvasTopbar: {
+    position: "absolute",
+    left: 12,
+    right: 12,
+    top: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  canvasBadge: {
+    height: 30,
+    borderRadius: 999,
+    backgroundColor: C.purple,
+    paddingHorizontal: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  canvasBadgeText: { color: C.bg, fontSize: 11, fontWeight: "900" },
+  canvasMeta: {
+    color: "rgba(244,247,242,.72)",
+    fontSize: 11,
+    fontWeight: "900",
+    backgroundColor: "rgba(7,10,14,.58)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,.08)",
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 999,
+    overflow: "hidden",
+  },
+  canvasRefs: {
+    position: "absolute",
+    left: 12,
+    bottom: 12,
+    flexDirection: "row",
+    gap: 7,
+  },
+  canvasRefThumb: {
+    width: 42,
+    height: 42,
+    borderRadius: 13,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,.25)",
+  },
+  inspirationCard: {
+    backgroundColor: "#10171F",
+    borderWidth: 1,
+    borderColor: "rgba(120,220,202,.18)",
+    borderRadius: 22,
+    padding: 14,
+    marginBottom: 10,
+  },
+  inspirationHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 12,
+  },
+  inspirationKicker: {
+    color: C.purple,
+    fontSize: 10,
+    fontWeight: "900",
+    marginBottom: 4,
+  },
+  inspirationTitle: { color: C.ink, fontSize: 17, fontWeight: "900" },
+  inspirationAction: {
+    height: 34,
+    borderRadius: 13,
+    backgroundColor: C.purple,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  inspirationActionText: { color: C.bg, fontSize: 12, fontWeight: "900" },
+  seedRow: { gap: 9, paddingRight: 4 },
+  seedCard: {
+    width: 154,
+    minHeight: 108,
+    borderRadius: 17,
+    backgroundColor: "#17212B",
+    borderWidth: 1,
+    borderColor: C.hairSoft,
+    padding: 12,
+  },
+  seedTag: {
+    alignSelf: "flex-start",
+    color: C.bg,
+    backgroundColor: C.amber,
+    overflow: "hidden",
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    fontSize: 10,
+    fontWeight: "900",
+    marginBottom: 8,
+  },
+  seedTitle: { color: C.ink, fontSize: 13, fontWeight: "900" },
+  seedSub: { color: C.muted, fontSize: 11, lineHeight: 16, fontWeight: "700", marginTop: 6 },
+  composerCard: {
+    backgroundColor: "rgba(18,25,54,.86)",
+    borderWidth: 1,
+    borderColor: "rgba(142,162,255,.20)",
+    borderRadius: 22,
+    padding: 14,
+    marginBottom: 11,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOpacity: 0.26,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 8,
+  },
+  composerAura: {
+    position: "absolute",
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    right: -34,
+    top: -42,
+    backgroundColor: "rgba(100,217,255,.10)",
+  },
+  promptInputDock: {
+    minHeight: 90,
+    maxHeight: 134,
+    width: "100%",
+    color: C.ink,
+    fontSize: 14,
+    lineHeight: 22,
+    fontWeight: "600",
+    textAlignVertical: "top",
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 10,
+    marginBottom: 8,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,.07)",
+    backgroundColor: "rgba(6,9,21,.38)",
+  },
+  promptHint: { color: "rgba(226,232,255,.46)", fontSize: 10, lineHeight: 14, fontWeight: "700", marginTop: 4 },
+  sectionHeadTight: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  styleShowcaseRow: { gap: 8, paddingRight: 20, marginBottom: 10 },
+  styleShowcaseCard: {
+    width: 78,
+    height: 92,
+    borderRadius: 18,
+    backgroundColor: "rgba(18,25,54,.82)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,.09)",
+    padding: 10,
+    justifyContent: "space-between",
+  },
+  styleShowcaseActive: {
+    borderColor: "rgba(142,162,255,.58)",
+    backgroundColor: "rgba(50,56,112,.72)",
+  },
+  styleShowcaseIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  styleShowcaseTitle: { color: C.ink, fontSize: 13, fontWeight: "900" },
+  styleShowcaseSub: { color: C.muted, fontSize: 9, fontWeight: "800", marginTop: 3 },
+  toolPanel: {
+    backgroundColor: "rgba(18,25,54,.78)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,.09)",
+    borderRadius: 22,
+    padding: 12,
+    marginBottom: 16,
+  },
+  toolGrid: {
+    flexDirection: "row",
+    flexWrap: "nowrap",
+    justifyContent: "space-between",
+    marginTop: 10,
+    marginBottom: 10,
+  },
+  toolBox: {
+    width: "23.2%",
+    height: 56,
+    borderRadius: 16,
+    backgroundColor: "rgba(8,12,28,.74)",
+    borderWidth: 1,
+    borderColor: "rgba(142,162,255,.16)",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    paddingHorizontal: 4,
+  },
+  toolBoxText: { color: C.ink, fontSize: 10, fontWeight: "900" },
+  toolRail: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 0,
+  },
+  railLabel: {
+    width: 44,
+    color: "rgba(226,232,255,.54)",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  optionRow: { gap: 7, paddingRight: 8 },
+  miniChip: {
+    height: 28,
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(8,12,28,.68)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,.08)",
+  },
+  miniChipActive: {
+    backgroundColor: "rgba(142,162,255,.18)",
+    borderColor: "rgba(142,162,255,.48)",
+  },
+  miniChipText: { color: C.muted, fontSize: 11, fontWeight: "900" },
+  miniChipTextActive: { color: C.purple, fontSize: 11, fontWeight: "900" },
+  composerBottom: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 2,
+    marginBottom: 8,
+  },
+  plazaButton: {
+    width: 116,
+    height: 40,
+    borderRadius: 14,
+    backgroundColor: "#17212B",
+    borderWidth: 1,
+    borderColor: "rgba(120,220,202,.18)",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  plazaButtonText: { color: C.purple, fontSize: 12, fontWeight: "900" },
+  refButton: {
+    flex: 1,
+    height: 40,
+    borderRadius: 14,
+    backgroundColor: "#17212B",
+    borderWidth: 1,
+    borderColor: "rgba(120,220,202,.18)",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+  },
+  refButtonOn: {
+    backgroundColor: C.purple,
+    borderColor: C.purple,
+  },
+  refButtonText: { color: C.ink, fontSize: 12, fontWeight: "900" },
+  secondaryTiny: {
+    width: 78,
+    height: 40,
+    borderRadius: 14,
+    backgroundColor: "#17212B",
+    borderWidth: 1,
+    borderColor: C.hairSoft,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+  },
+  secondaryTinyText: { color: C.muted, fontSize: 12, fontWeight: "900" },
+  inlinePrimary: {
+    height: 50,
+    borderRadius: 16,
+    backgroundColor: C.amber,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 0,
+    marginBottom: 0,
+    shadowColor: C.purple,
+    shadowOpacity: 0.30,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 10,
+  },
+  inlinePrimaryOff: {
+    backgroundColor: "rgba(255,255,255,.12)",
+  },
+  cancelPrimary: {
+    backgroundColor: "#FFB0A6",
+  },
+  inlinePrimaryText: { color: "#06101E", fontSize: 16, fontWeight: "900" },
+  inlinePrimaryTextOff: { color: "rgba(237,239,247,.45)" },
+
+  createHero: {
+    backgroundColor: "#12152A",
+    borderWidth: 1,
+    borderColor: "rgba(120,220,202,.20)",
+    borderRadius: 22,
+    padding: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 12,
+  },
+  createHeroIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 18,
+    backgroundColor: "rgba(120,220,202,.12)",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(120,220,202,.30)",
+  },
+  createHeroTitle: { color: C.ink, fontSize: 17, fontWeight: "900" },
+  createHeroSub: { color: C.muted, fontSize: 12, fontWeight: "600", marginTop: 4, lineHeight: 17 },
+  modebar: {
+    backgroundColor: "#12152A",
+    borderWidth: 1,
+    borderColor: C.hairSoft,
+    marginBottom: 16,
+    padding: 4,
+    borderRadius: 999,
     flexDirection: "row",
     gap: 5,
   },
   mode: {
     flex: 1,
-    height: 40,
-    borderRadius: 16,
+    height: 38,
+    borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",
+    flexDirection: "row",
+    gap: 6,
   },
-  modeActive: { backgroundColor: "rgba(255,255,255,.82)" },
+  modeActive: { backgroundColor: "rgba(120,220,202,.15)", borderWidth: 1, borderColor: "rgba(120,220,202,.42)" },
   modeText: { color: "rgba(255,255,255,.66)", fontSize: 13, fontWeight: "900" },
-  modeTextActive: { color: "#10131a", fontSize: 13, fontWeight: "900" },
+  modeTextActive: { color: "#EDEFF7", fontSize: 13, fontWeight: "900" },
   promptCard: {
-    ...glass,
-    minHeight: 220,
-    borderRadius: 26,
-    padding: 17,
+    backgroundColor: "#12152A",
+    borderWidth: 1,
+    borderColor: C.hairSoft,
+    shadowColor: "#000",
+    shadowOpacity: 0.20,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 5,
+    minHeight: 214,
+    borderRadius: 16,
+    padding: 16,
     marginBottom: 13,
   },
   promptHead: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     justifyContent: "space-between",
-    marginBottom: 13,
+    gap: 10,
+    marginBottom: 10,
   },
+  promptCopy: { flex: 1, minWidth: 0 },
   promptLabel: {
-    color: "rgba(255,255,255,.76)",
-    fontSize: 12,
-    fontWeight: "900",
+    color: C.purple,
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 1.2,
   },
   magic: {
     flexDirection: "row",
@@ -1217,21 +2174,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 6,
     borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,.045)",
   },
-  magicText: { color: "#fff3c2", fontSize: 12, fontWeight: "900" },
-  magicTextBlue: { color: "#bfe9ff" },
-  headActions: { flexDirection: "row", alignItems: "center", gap: 4 },
+  magicText: { color: C.amber, fontSize: 12, fontWeight: "900" },
+  magicTextBlue: { color: C.purple },
+  headActions: { flexDirection: "row", alignItems: "center", flexShrink: 0, gap: 4 },
   assistCard: {
-    ...glass,
-    borderRadius: 22,
+    backgroundColor: "rgba(120,220,202,.08)",
+    borderWidth: 1,
+    borderColor: "rgba(120,220,202,.24)",
+    borderRadius: 18,
     padding: 15,
     marginBottom: 13,
-    borderColor: "rgba(150,210,255,.35)",
   },
   assistHead: { flexDirection: "row", alignItems: "center", gap: 7 },
   assistTitle: {
     flex: 1,
-    color: "#bfe9ff",
+    color: C.purple,
     fontSize: 12,
     fontWeight: "900",
   },
@@ -1244,45 +2203,110 @@ const styles = StyleSheet.create({
   },
   assistChips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 12 },
   assistChip: {
-    backgroundColor: "rgba(150,210,255,.16)",
+    backgroundColor: "rgba(120,220,202,.10)",
     borderWidth: 1,
-    borderColor: "rgba(150,210,255,.34)",
+    borderColor: "rgba(120,220,202,.28)",
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 7,
   },
-  assistChipText: { color: "#d6efff", fontSize: 12, fontWeight: "900" },
+  assistChipText: { color: C.purple, fontSize: 12, fontWeight: "900" },
   promptInput: {
     flex: 1,
     minHeight: 154,
-    color: "#fff",
-    fontSize: 17,
-    lineHeight: 28,
-    fontWeight: "600",
+    color: C.ink,
+    fontSize: 15,
+    lineHeight: 24,
+    fontWeight: "500",
     textAlignVertical: "top",
     padding: 0,
   },
   chipRow: { gap: 8, paddingRight: 18, marginBottom: 13 },
   chip: {
-    ...plain,
-    height: 35,
+    backgroundColor: "#1A1E36",
+    borderWidth: 1,
+    borderColor: C.hairSoft,
+    height: 34,
     borderRadius: 999,
     paddingHorizontal: 13,
     alignItems: "center",
     justifyContent: "center",
   },
   chipActive: {
-    backgroundColor: "rgba(255,255,255,.84)",
-    borderColor: "transparent",
+    backgroundColor: "rgba(120,220,202,.14)",
+    borderColor: "rgba(120,220,202,.34)",
   },
   chipText: { color: "rgba(255,255,255,.76)", fontSize: 12, fontWeight: "900" },
-  chipTextActive: { color: "#11131a", fontSize: 12, fontWeight: "900" },
+  chipTextActive: { color: C.purple, fontSize: 12, fontWeight: "900" },
+
+  uploadPanel: {
+    backgroundColor: "#12152A",
+    borderWidth: 1,
+    borderColor: C.hairSoft,
+    borderRadius: 18,
+    padding: 12,
+    marginBottom: 12,
+  },
+  uploadHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
+  uploadTitle: { color: C.ink, fontSize: 14, fontWeight: "900" },
+  uploadCount: { color: C.purple, fontSize: 12, fontWeight: "900" },
+  uploadDrop: {
+    minHeight: 86,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: "rgba(120,220,202,.30)",
+    backgroundColor: "rgba(120,220,202,.07)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 14,
+  },
+  uploadIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 16,
+    backgroundColor: "rgba(120,220,202,.12)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  uploadMain: { color: C.ink, fontSize: 15, fontWeight: "900" },
+  uploadSub: { color: C.muted, fontSize: 11, fontWeight: "600", lineHeight: 16, marginTop: 3 },
+  clearPrompt: {
+    height: 40,
+    borderRadius: 14,
+    backgroundColor: "#1A1E36",
+    borderWidth: 1,
+    borderColor: C.hairSoft,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    marginBottom: 12,
+  },
+  clearPromptText: { color: C.muted, fontSize: 12, fontWeight: "800" },
+  refWrap: { position: "relative" },
+  refRemove: {
+    position: "absolute",
+    right: -5,
+    top: -5,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: "rgba(15,18,36,.92)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,.22)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   tools: { flexDirection: "row", gap: 9, marginBottom: 13 },
   tool: {
-    ...plain,
+    backgroundColor: "#1A1E36",
+    borderWidth: 1,
+    borderColor: C.hairSoft,
     flex: 1,
     height: 68,
-    borderRadius: 22,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
     gap: 5,
@@ -1298,26 +2322,34 @@ const styles = StyleSheet.create({
   refThumb: {
     width: 62,
     height: 62,
-    borderRadius: 18,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: C.hair,
   },
   taskCard: {
-    ...glass,
-    minHeight: 248,
-    borderRadius: 32,
+    backgroundColor: "rgba(18,25,54,.86)",
+    borderWidth: 1,
+    borderColor: "rgba(142,162,255,.22)",
+    minHeight: 238,
+    borderRadius: 24,
     padding: 22,
     alignItems: "center",
     justifyContent: "center",
     marginTop: 10,
+    marginBottom: 12,
+    shadowColor: C.purple,
+    shadowOpacity: 0.18,
+    shadowRadius: 26,
+    shadowOffset: { width: 0, height: 14 },
+    elevation: 8,
   },
   ring: {
     width: 128,
     height: 128,
     borderRadius: 64,
-    backgroundColor: "rgba(12,18,28,.62)",
-    borderWidth: 1,
-    borderColor: C.hair,
+    backgroundColor: "rgba(139,124,255,.12)",
+    borderWidth: 3,
+    borderColor: "rgba(142,162,255,.58)",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 18,
@@ -1331,6 +2363,20 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     textAlign: "center",
   },
+  cancelTaskButton: {
+    height: 38,
+    borderRadius: 14,
+    paddingHorizontal: 13,
+    marginTop: 14,
+    backgroundColor: "rgba(255,176,166,.12)",
+    borderWidth: 1,
+    borderColor: "rgba(255,176,166,.28)",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  cancelTaskText: { color: "#FFD7D2", fontSize: 12, fontWeight: "900" },
   progressTrack: {
     width: "100%",
     height: 8,
@@ -1342,8 +2388,86 @@ const styles = StyleSheet.create({
   progressFill: {
     height: 8,
     borderRadius: 99,
-    backgroundColor: "rgba(255,255,255,.92)",
+    backgroundColor: C.cyan,
   },
+
+  taskPills: { flexDirection: "row", gap: 8, marginBottom: 10 },
+  taskPill: {
+    color: "#B8A4FF",
+    fontSize: 11,
+    fontWeight: "900",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: "rgba(120,220,202,.10)",
+    borderWidth: 1,
+    borderColor: "rgba(120,220,202,.20)",
+  },
+  galleryHero: {
+    backgroundColor: "rgba(18,25,54,.82)",
+    borderWidth: 1,
+    borderColor: "rgba(142,162,255,.18)",
+    borderRadius: 22,
+    padding: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 12,
+  },
+  galleryHeroTitle: { color: C.ink, fontSize: 18, fontWeight: "900" },
+  galleryHeroSub: { color: C.muted, fontSize: 12, fontWeight: "600", marginTop: 4 },
+  filterRow: { flexDirection: "row", gap: 8, marginBottom: 14 },
+  filterChip: {
+    height: 34,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    backgroundColor: "rgba(18,25,54,.74)",
+    borderWidth: 1,
+    borderColor: C.hairSoft,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  filterChipActive: { backgroundColor: "rgba(120,220,202,.14)", borderColor: "rgba(120,220,202,.34)" },
+  filterText: { color: C.muted, fontSize: 12, fontWeight: "800" },
+  filterTextActive: { color: C.purple, fontSize: 12, fontWeight: "900" },
+  galleryEmpty: {
+    minHeight: 180,
+    borderRadius: 20,
+    backgroundColor: "#12152A",
+    borderWidth: 1,
+    borderColor: C.hairSoft,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 18,
+    marginTop: 4,
+  },
+  galleryEmptyTitle: { color: C.ink, fontSize: 16, fontWeight: "900", marginTop: 10 },
+  galleryEmptySub: { color: C.muted, fontSize: 12, fontWeight: "600", marginTop: 6, textAlign: "center", lineHeight: 18 },
+  tileMeta: { position: "absolute", left: 12, right: 12, bottom: 12 },
+  tileSub: { color: "rgba(255,255,255,.66)", fontSize: 10, fontWeight: "700", marginTop: 3 },
+  profileMenu: { gap: 10, marginBottom: 14 },
+  profileMenuRow: {
+    minHeight: 70,
+    borderRadius: 16,
+    backgroundColor: "#12152A",
+    borderWidth: 1,
+    borderColor: C.hairSoft,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 14,
+  },
+  profileMenuIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    backgroundColor: "rgba(120,220,202,.10)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  profileMenuTitle: { color: C.ink, fontSize: 14, fontWeight: "900" },
+  profileMenuSub: { color: C.muted, fontSize: 11, fontWeight: "600", marginTop: 3 },
   warnText: {
     color: "#ffd0d6",
     fontSize: 12,
@@ -1353,23 +2477,23 @@ const styles = StyleSheet.create({
   },
   primary: {
     position: "absolute",
-    left: 18,
-    right: 18,
-    bottom: 88,
-    height: 58,
-    borderRadius: 22,
+    left: 20,
+    right: 20,
+    bottom: 92,
+    height: 54,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: C.amber,
-    shadowColor: "#ffb446",
+    shadowColor: "#78DCCA",
     shadowOpacity: 0.32,
     shadowRadius: 30,
     shadowOffset: { width: 0, height: 18 },
     elevation: 12,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,.6)",
+    borderColor: "rgba(120,220,202,.42)",
   },
-  primaryText: { color: "#11131a", fontSize: 16, fontWeight: "900" },
+  primaryText: { color: "#fff", fontSize: 16, fontWeight: "900" },
   primaryOff: {
     backgroundColor: "rgba(255,255,255,.18)",
     shadowOpacity: 0.05,
@@ -1377,26 +2501,32 @@ const styles = StyleSheet.create({
   },
   primaryTextOff: { color: "rgba(255,255,255,.52)" },
   tabs: {
-    ...glass,
+    backgroundColor: "rgba(11,15,33,.92)",
+    borderWidth: 1,
+    borderColor: "rgba(142,162,255,.18)",
+    shadowColor: "#000",
+    shadowOpacity: 0.28,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 10,
     position: "absolute",
-    left: 18,
-    right: 18,
-    bottom: 22,
-    height: 50,
-    borderRadius: 22,
+    bottom: Platform.OS === "ios" ? 18 : 14,
+    height: 58,
+    borderRadius: 20,
     padding: 5,
     flexDirection: "row",
-    gap: 5,
+    gap: 4,
   },
   tab: {
     flex: 1,
-    borderRadius: 17,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
+    gap: 3,
   },
-  tabActive: { backgroundColor: "rgba(255,255,255,.84)" },
-  tabText: { color: "rgba(255,255,255,.56)", fontSize: 12, fontWeight: "900" },
-  tabTextActive: { color: "#10131a", fontSize: 12, fontWeight: "900" },
+  tabActive: { backgroundColor: "rgba(139,124,255,.18)" },
+  tabText: { color: "rgba(237,239,247,.48)", fontSize: 9, fontWeight: "700" },
+  tabTextActive: { color: "#AEBBFF", fontSize: 9, fontWeight: "800" },
   galleryHead: {
     flexDirection: "row",
     alignItems: "center",
@@ -1424,11 +2554,11 @@ const styles = StyleSheet.create({
   tile: {
     width: "48%",
     minHeight: 158,
-    borderRadius: 24,
+    borderRadius: 20,
     overflow: "hidden",
     borderWidth: 1,
-    borderColor: C.hair,
-    backgroundColor: "rgba(255,255,255,.10)",
+    borderColor: "rgba(142,162,255,.16)",
+    backgroundColor: "rgba(18,25,54,.72)",
   },
   tileTall: { minHeight: 214 },
   tileImg: { width: "100%", height: "100%", position: "absolute" },
@@ -1453,12 +2583,51 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,.84)",
+    backgroundColor: "rgba(120,220,202,.78)",
   },
+
+  profileHeader: {
+    backgroundColor: "#10171F",
+    borderWidth: 1,
+    borderColor: "rgba(120,220,202,.16)",
+    borderRadius: 22,
+    padding: 18,
+    alignItems: "center",
+    marginBottom: 14,
+  },
+  avatar: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: "rgba(120,220,202,.14)",
+    borderWidth: 1,
+    borderColor: "rgba(120,220,202,.34)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 10,
+  },
+  avatarText: { color: C.purple, fontSize: 26, fontWeight: "900" },
+  profileName: { color: C.ink, fontSize: 18, fontWeight: "800" },
+  profileMeta: { color: C.muted, fontSize: 12, fontWeight: "600", marginTop: 4 },
+  profileStats: { flexDirection: "row", gap: 8, marginTop: 14, width: "100%" },
+  profileStat: {
+    flex: 1,
+    minHeight: 58,
+    borderRadius: 14,
+    backgroundColor: "#17212B",
+    borderWidth: 1,
+    borderColor: C.hairSoft,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  profileStatNum: { color: C.ink, fontSize: 15, fontWeight: "900" },
+  profileStatLabel: { color: C.muted, fontSize: 10, fontWeight: "700", marginTop: 3 },
   statusStrip: {
-    ...glass,
+    backgroundColor: "#10171F",
+    borderWidth: 1,
+    borderColor: C.hairSoft,
     minHeight: 66,
-    borderRadius: 24,
+    borderRadius: 16,
     paddingHorizontal: 15,
     paddingVertical: 14,
     flexDirection: "row",
@@ -1475,7 +2644,7 @@ const styles = StyleSheet.create({
     maxWidth: 230,
   },
   statusAction: {
-    backgroundColor: "rgba(255,255,255,.84)",
+    backgroundColor: C.amber,
     height: 36,
     borderRadius: 18,
     paddingHorizontal: 15,
@@ -1483,7 +2652,39 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   statusActionText: { color: "#10131a", fontSize: 12, fontWeight: "900" },
-  settingsCard: { ...glass, borderRadius: 26, overflow: "hidden", padding: 0 },
+  settingsCard: { backgroundColor: "#10171F", borderWidth: 1, borderColor: C.hairSoft, borderRadius: 22, overflow: "hidden", padding: 0 },
+  configHero: {
+    minHeight: 96,
+    padding: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,.10)",
+  },
+  configKicker: { color: C.purple, fontSize: 10, fontWeight: "900", marginBottom: 5 },
+  configTitle: { color: C.ink, fontSize: 20, fontWeight: "900" },
+  configSub: { color: C.muted, fontSize: 11, lineHeight: 17, fontWeight: "700", marginTop: 5, maxWidth: 210 },
+  configStats: {
+    flexDirection: "row",
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,.10)",
+  },
+  configAction: {
+    height: 42,
+    borderRadius: 15,
+    backgroundColor: C.purple,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    marginTop: 12,
+  },
+  configActionText: { color: C.bg, fontSize: 13, fontWeight: "900" },
   settingsRow: {
     minHeight: 74,
     paddingHorizontal: 16,
@@ -1495,13 +2696,15 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "rgba(255,255,255,.11)",
   },
+  rowText: { flex: 1, minWidth: 0 },
   rowTitle: { color: C.ink, fontSize: 14, fontWeight: "900" },
   rowSub: {
     color: C.muted,
     fontSize: 11,
     fontWeight: "800",
     marginTop: 4,
-    maxWidth: 245,
+    maxWidth: "100%",
+    lineHeight: 16,
   },
   editText: { color: "#fff1bd", fontSize: 12, fontWeight: "900" },
   settingsBody: {
@@ -1531,6 +2734,73 @@ const styles = StyleSheet.create({
     color: C.ink,
     fontSize: 14,
   },
+  plazaModalHeader: {
+    paddingTop: Platform.OS === "ios" ? 14 : 8,
+    paddingHorizontal: 18,
+    paddingBottom: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,.10)",
+  },
+  plazaModalKicker: { color: C.purple, fontSize: 10, fontWeight: "900", marginBottom: 5 },
+  plazaModalTitle: { color: C.ink, fontSize: 22, fontWeight: "900" },
+  modalCloseSmall: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "#10171F",
+    borderWidth: 1,
+    borderColor: C.hairSoft,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  plazaModalBody: {
+    padding: 18,
+    paddingBottom: 36,
+    gap: 12,
+  },
+  externalPlazaCard: {
+    minHeight: 76,
+    borderRadius: 18,
+    backgroundColor: "rgba(120,220,202,.08)",
+    borderWidth: 1,
+    borderColor: "rgba(120,220,202,.22)",
+    padding: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  externalPlazaTitle: { color: C.ink, fontSize: 15, fontWeight: "900" },
+  externalPlazaSub: { color: C.muted, fontSize: 11, lineHeight: 16, fontWeight: "700", marginTop: 5, maxWidth: 280 },
+  plazaItem: {
+    borderRadius: 18,
+    backgroundColor: "#10171F",
+    borderWidth: 1,
+    borderColor: C.hairSoft,
+    padding: 14,
+  },
+  plazaItemTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  plazaItemTag: {
+    color: C.bg,
+    backgroundColor: C.amber,
+    overflow: "hidden",
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    fontSize: 10,
+    fontWeight: "900",
+  },
+  plazaItemStyle: { color: C.purple, fontSize: 11, fontWeight: "900" },
+  plazaItemTitle: { color: C.ink, fontSize: 16, fontWeight: "900" },
+  plazaItemPrompt: { color: C.muted, fontSize: 12, lineHeight: 19, fontWeight: "700", marginTop: 8 },
   modalSafe: { flex: 1, backgroundColor: "#070a10" },
   modalClose: {
     position: "absolute",
