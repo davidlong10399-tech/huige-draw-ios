@@ -155,6 +155,20 @@ const styleShowcase = [
   },
 ] as const;
 
+const sizeOptions = [
+  { key: "1:1", label: "方图" },
+  { key: "3:4", label: "竖图" },
+  { key: "4:3", label: "横图" },
+  { key: "9:16", label: "手机" },
+  { key: "16:9", label: "壁纸" },
+] as const;
+
+const resolutionOptions = [
+  { key: "std", label: "标准" },
+  { key: "2k", label: "2K" },
+  { key: "4k", label: "4K" },
+] as const;
+
 const promptPlaza = [
   {
     tag: "电商",
@@ -311,6 +325,7 @@ export default function App() {
     DEFAULT_PROMPT_PLAZA_URL,
   );
   const [showSettings, setShowSettings] = useState(false);
+  const [expandedConfig, setExpandedConfig] = useState(false);
   const [expandedImageSettings, setExpandedImageSettings] = useState(false);
   const [expandedTextSettings, setExpandedTextSettings] = useState(false);
   const [expandedPlazaSettings, setExpandedPlazaSettings] = useState(false);
@@ -333,6 +348,7 @@ export default function App() {
   const [results, setResults] = useState<GenerateResult[]>([]);
   const [selected, setSelected] = useState<GenerateResult | null>(null);
   const [showPromptPlaza, setShowPromptPlaza] = useState(false);
+  const [showGenerationPage, setShowGenerationPage] = useState(false);
   const [galleryFilter, setGalleryFilter] = useState<"all" | "recent" | "fast">("all");
   const progressTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const generateAbortRef = useRef<AbortController | null>(null);
@@ -385,7 +401,6 @@ export default function App() {
     }
     return results;
   }, [galleryFilter, results]);
-  const latestResult = results[0];
   useKeepAwake(activeTask ? "huaren-active-task" : undefined);
 
   useEffect(() => {
@@ -441,6 +456,7 @@ export default function App() {
   useEffect(() => {
     if (!hydrated || settingsLayoutInitialized.current) return;
     settingsLayoutInitialized.current = true;
+    setExpandedConfig(!imageConfigured || !textConfigured);
     setExpandedImageSettings(!imageConfigured);
     setExpandedTextSettings(imageConfigured && !textConfigured);
   }, [hydrated, imageConfigured, textConfigured]);
@@ -647,6 +663,8 @@ export default function App() {
       );
     const controller = new AbortController();
     generateAbortRef.current = controller;
+    setShowGenerationPage(true);
+    setTab("create");
     setGenerating(true);
     startProgress(mode === "edit" ? "正在以图改图" : "正在生成图片");
     try {
@@ -679,9 +697,11 @@ export default function App() {
       }
       setResults((prev) => [saved, ...prev].slice(0, MAX_HISTORY));
       await finishProgress("生成完成");
+      setShowGenerationPage(false);
       setSelected(saved);
     } catch (e: any) {
       stopProgress();
+      setShowGenerationPage(false);
       if (/cancelled|已取消生成/.test(e?.message || String(e))) {
         setProgressText("");
       } else {
@@ -761,10 +781,10 @@ export default function App() {
           <View style={styles.top}>
             <View>
               <Text style={styles.brand}>
-                {tab === "create" ? "画刃" : tab === "gallery" ? "作品" : "设置"}
+                {showGenerationPage ? "生成中" : tab === "create" ? "画刃" : tab === "gallery" ? "作品" : "设置"}
               </Text>
               <Text style={styles.brandSub}>
-                {tab === "create" ? "移动 AI 图像工作台" : tab === "gallery" ? "复用、保存和继续改图" : "接口、模型和偏好"}
+                {showGenerationPage ? "保持前台，完成后自动预览" : tab === "create" ? "移动 AI 图像工作台" : tab === "gallery" ? "复用、保存和继续改图" : "接口、模型和偏好"}
               </Text>
             </View>
             <Pressable style={styles.pill} onPress={() => setTab("profile")}>
@@ -785,7 +805,57 @@ export default function App() {
               </Text>
             </Pressable>
           </View>
-          {tab === "create" && (
+          {showGenerationPage && (
+            <View style={styles.generationPage}>
+              <View style={styles.generationHero}>
+                <Text style={styles.generationKicker}>GENERATING</Text>
+                <Text style={styles.generationTitle}>
+                  {mode === "edit" ? "正在以图改图" : "正在生成图片"}
+                </Text>
+                <Text style={styles.generationSub}>
+                  {progressText || "正在排队渲染画面，请保持应用在前台。"}
+                </Text>
+              </View>
+
+              <View style={styles.generationProgressCard}>
+                <View style={styles.generationRing}>
+                  <Text style={styles.generationPct}>{Math.round(progress * 100)}%</Text>
+                  <Text style={styles.generationPctSub}>画面成型中</Text>
+                </View>
+                <View style={styles.progressTrack}>
+                  <View
+                    style={[
+                      styles.progressFill,
+                      { width: (String(Math.round(progress * 100)) + "%") as any },
+                    ]}
+                  />
+                </View>
+              </View>
+
+              <View style={styles.generationMetaCard}>
+                <View style={styles.generationMetaRow}>
+                  <Text style={styles.generationMetaLabel}>模式</Text>
+                  <Text style={styles.generationMetaValue}>{mode === "edit" ? "参考图" : "文生图"}</Text>
+                </View>
+                <View style={styles.generationMetaRow}>
+                  <Text style={styles.generationMetaLabel}>尺寸</Text>
+                  <Text style={styles.generationMetaValue}>
+                    {size} · {resolution === "std" ? "标准" : resolution.toUpperCase()}
+                  </Text>
+                </View>
+                <View style={styles.generationMetaRow}>
+                  <Text style={styles.generationMetaLabel}>风格</Text>
+                  <Text style={styles.generationMetaValue}>{style}</Text>
+                </View>
+              </View>
+
+              <Pressable style={styles.generationCancel} onPress={cancelGenerate}>
+                <Ionicons name="close-circle-outline" size={19} color="#FFD7D2" />
+                <Text style={styles.cancelTaskText}>取消生成</Text>
+              </Pressable>
+            </View>
+          )}
+          {!showGenerationPage && tab === "create" && (
             <>
               <View style={styles.studioHero}>
                 <View style={styles.logoMark}>
@@ -972,13 +1042,29 @@ export default function App() {
                 </View>
 
                 <View style={styles.toolRail}>
+                  <Text style={styles.railLabel}>尺寸</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.optionRow}>
+                    {sizeOptions.map((r) => {
+                      const active = size === r.key;
+                      return (
+                        <Pressable
+                          key={r.key}
+                          style={[styles.miniChip, active && styles.miniChipActive]}
+                          onPress={() => setSize(r.key)}
+                        >
+                          <Text style={active ? styles.miniChipTextActive : styles.miniChipText}>
+                            {r.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+
+                <View style={[styles.toolRail, styles.toolRailLast]}>
                   <Text style={styles.railLabel}>清晰度</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.optionRow}>
-                    {[
-                      { key: "std", label: "标准" },
-                      { key: "2k", label: "2K" },
-                      { key: "4k", label: "4K" },
-                    ].map((r) => {
+                    {resolutionOptions.map((r) => {
                       const active = resolution === r.key;
                       return (
                         <Pressable
@@ -1017,89 +1103,9 @@ export default function App() {
                   以图改图需要先上传参考图，否则不会请求接口。
                 </Text>
               )}
-
-              {!!progress && (
-                <View style={styles.taskCard}>
-                  <View style={styles.ring}>
-                    <Text style={styles.pct}>
-                      {Math.round(progress * 100)}%
-                    </Text>
-                    <Text style={styles.pctSub}>正在绘制</Text>
-                  </View>
-                  <Text style={styles.taskTitle}>
-                    {progressText || "画面成型中"}
-                  </Text>
-                  <Text style={styles.taskSub}>
-                    前台保持亮屏，完成后自动进入作品流。
-                  </Text>
-                  <Pressable style={styles.cancelTaskButton} onPress={cancelGenerate}>
-                    <Ionicons name="close-circle-outline" size={18} color="#FFD7D2" />
-                    <Text style={styles.cancelTaskText}>取消生成</Text>
-                  </Pressable>
-                  <View style={styles.progressTrack}>
-                    <View
-                      style={[
-                        styles.progressFill,
-                        {
-                          width: (String(Math.round(progress * 100)) +
-                            "%") as any,
-                        },
-                      ]}
-                    />
-                  </View>
-                </View>
-              )}
-
-              {latestResult ? (
-                <Pressable
-                  style={styles.canvasCard}
-                  onPress={() => setSelected(latestResult)}
-                >
-                  <Image
-                    source={{ uri: latestResult.localUri || latestResult.url }}
-                    style={styles.canvasImage}
-                  />
-                  <View style={styles.canvasTopbar}>
-                    <View style={styles.canvasBadge}>
-                      <Ionicons name="sparkles" size={13} color={C.bg} />
-                      <Text style={styles.canvasBadgeText}>最近作品</Text>
-                    </View>
-                    <Text style={styles.canvasMeta}>{size} · {resolution === "std" ? "标准" : resolution.toUpperCase()}</Text>
-                  </View>
-                  {mode === "edit" && !!refs.length && (
-                    <View style={styles.canvasRefs}>
-                      {refs.slice(0, 4).map((r, i) => (
-                        <Image key={i} source={{ uri: r.uri }} style={styles.canvasRefThumb} />
-                      ))}
-                    </View>
-                  )}
-                </Pressable>
-              ) : (
-                <View style={styles.inspirationCard}>
-                  <View style={styles.inspirationHead}>
-                    <View>
-                      <Text style={styles.inspirationKicker}>PROMPT PLAZA</Text>
-                      <Text style={styles.inspirationTitle}>提示词灵感库</Text>
-                    </View>
-                    <Pressable style={styles.inspirationAction} onPress={() => setShowPromptPlaza(true)}>
-                      <Ionicons name="albums-outline" size={16} color={C.bg} />
-                      <Text style={styles.inspirationActionText}>广场</Text>
-                    </Pressable>
-                  </View>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.seedRow}>
-                    {promptPlaza.slice(0, 3).map((item) => (
-                      <Pressable key={item.title} style={styles.seedCard} onPress={() => applyPromptPreset(item)}>
-                        <Text style={styles.seedTag}>{item.tag}</Text>
-                        <Text style={styles.seedTitle}>{item.title}</Text>
-                        <Text style={styles.seedSub} numberOfLines={2}>{item.prompt}</Text>
-                      </Pressable>
-                    ))}
-                  </ScrollView>
-                </View>
-              )}
             </>
           )}
-          {tab === "gallery" && (
+          {!showGenerationPage && tab === "gallery" && (
             <View>
               <View style={styles.galleryHero}>
                 <View>
@@ -1165,24 +1171,35 @@ export default function App() {
               </View>
             </View>
           )}
-          {tab === "profile" && (
+          {!showGenerationPage && tab === "profile" && (
             <>
               <View style={styles.settingsCard}>
-                <View style={styles.configHero}>
-                  <View>
+                <Pressable
+                  style={styles.configHero}
+                  onPress={() => setExpandedConfig((v) => !v)}
+                >
+                  <View style={styles.rowText}>
                     <Text style={styles.configKicker}>MY CONFIG</Text>
                     <Text style={styles.configTitle}>我的配置</Text>
                     <Text style={styles.configSub}>{connected}</Text>
                   </View>
-                  <Pressable style={styles.statusAction} onPress={checkHealth}>
-                    <Text style={styles.statusActionText}>测试连接</Text>
-                  </Pressable>
-                </View>
-                <View style={styles.configStats}>
-                  <View style={styles.profileStat}><Text style={styles.profileStatNum}>{results.length}</Text><Text style={styles.profileStatLabel}>作品</Text></View>
-                  <View style={styles.profileStat}><Text style={styles.profileStatNum}>{imageConfigured ? "已连" : "待配"}</Text><Text style={styles.profileStatLabel}>生图</Text></View>
-                  <View style={styles.profileStat}><Text style={styles.profileStatNum}>{textConfigured ? "已连" : "待配"}</Text><Text style={styles.profileStatLabel}>文本</Text></View>
-                </View>
+                  <View style={styles.configHeroAction}>
+                    <Text style={styles.editText}>{expandedConfig ? "收起" : "展开"}</Text>
+                    <Ionicons name={expandedConfig ? "chevron-up" : "chevron-down"} size={17} color="#fff1bd" />
+                  </View>
+                </Pressable>
+                {expandedConfig && (
+                  <>
+                    <View style={styles.configStats}>
+                      <View style={styles.profileStat}><Text style={styles.profileStatNum}>{results.length}</Text><Text style={styles.profileStatLabel}>作品</Text></View>
+                      <View style={styles.profileStat}><Text style={styles.profileStatNum}>{imageConfigured ? "已连" : "待配"}</Text><Text style={styles.profileStatLabel}>生图</Text></View>
+                      <View style={styles.profileStat}><Text style={styles.profileStatNum}>{textConfigured ? "已连" : "待配"}</Text><Text style={styles.profileStatLabel}>文本</Text></View>
+                    </View>
+                    <View style={styles.configToolbar}>
+                      <Pressable style={styles.statusAction} onPress={checkHealth}>
+                        <Text style={styles.statusActionText}>测试连接</Text>
+                      </Pressable>
+                    </View>
                 <Pressable
                   style={styles.settingsRow}
                   onPress={() => setExpandedImageSettings((v) => !v)}
@@ -1367,12 +1384,14 @@ export default function App() {
                     </Pressable>
                   </View>
                 )}
+                  </>
+                )}
               </View>
             </>
           )}
           </View>
         </ScrollView>
-        <View style={[styles.tabs, { left: pageLeft, width: pageWidth }]}>
+        {!showGenerationPage && <View style={[styles.tabs, { left: pageLeft, width: pageWidth }]}>
           {(
             [
               ["create", "创作", "sparkles-outline"],
@@ -1394,7 +1413,7 @@ export default function App() {
               </Pressable>
             );
           })}
-        </View>
+        </View>}
         <Modal
           visible={!!selected}
           animationType="slide"
@@ -1995,8 +2014,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    marginBottom: 0,
+    marginBottom: 8,
   },
+  toolRailLast: { marginBottom: 0 },
   railLabel: {
     width: 44,
     color: "rgba(226,232,255,.54)",
@@ -2390,6 +2410,78 @@ const styles = StyleSheet.create({
     borderRadius: 99,
     backgroundColor: C.cyan,
   },
+  generationPage: {
+    minHeight: 620,
+    paddingTop: 6,
+    gap: 12,
+  },
+  generationHero: {
+    borderRadius: 24,
+    backgroundColor: "rgba(18,25,54,.86)",
+    borderWidth: 1,
+    borderColor: "rgba(142,162,255,.20)",
+    padding: 18,
+  },
+  generationKicker: { color: C.purple, fontSize: 10, fontWeight: "900", marginBottom: 6 },
+  generationTitle: { color: C.ink, fontSize: 24, lineHeight: 31, fontWeight: "900" },
+  generationSub: { color: C.muted, fontSize: 12, lineHeight: 19, fontWeight: "700", marginTop: 6 },
+  generationProgressCard: {
+    minHeight: 260,
+    borderRadius: 26,
+    backgroundColor: "rgba(18,25,54,.76)",
+    borderWidth: 1,
+    borderColor: "rgba(142,162,255,.18)",
+    padding: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: C.purple,
+    shadowOpacity: 0.20,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 16 },
+    elevation: 9,
+  },
+  generationRing: {
+    width: 148,
+    height: 148,
+    borderRadius: 74,
+    backgroundColor: "rgba(139,124,255,.14)",
+    borderWidth: 3,
+    borderColor: "rgba(142,162,255,.62)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 22,
+  },
+  generationPct: { color: C.ink, fontSize: 34, fontWeight: "900" },
+  generationPctSub: { color: C.muted, fontSize: 11, fontWeight: "900", marginTop: 4 },
+  generationMetaCard: {
+    borderRadius: 20,
+    backgroundColor: "rgba(18,25,54,.72)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,.09)",
+    overflow: "hidden",
+  },
+  generationMetaRow: {
+    minHeight: 48,
+    paddingHorizontal: 15,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,.08)",
+  },
+  generationMetaLabel: { color: C.muted, fontSize: 12, fontWeight: "900" },
+  generationMetaValue: { color: C.ink, fontSize: 13, fontWeight: "900" },
+  generationCancel: {
+    height: 46,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,176,166,.12)",
+    borderWidth: 1,
+    borderColor: "rgba(255,176,166,.28)",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+  },
 
   taskPills: { flexDirection: "row", gap: 8, marginBottom: 10 },
   taskPill: {
@@ -2663,6 +2755,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "rgba(255,255,255,.10)",
   },
+  configHeroAction: { flexDirection: "row", alignItems: "center", gap: 5, flexShrink: 0 },
   configKicker: { color: C.purple, fontSize: 10, fontWeight: "900", marginBottom: 5 },
   configTitle: { color: C.ink, fontSize: 20, fontWeight: "900" },
   configSub: { color: C.muted, fontSize: 11, lineHeight: 17, fontWeight: "700", marginTop: 5, maxWidth: 210 },
@@ -2671,6 +2764,12 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 16,
     paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,.10)",
+  },
+  configToolbar: {
+    paddingHorizontal: 16,
+    paddingBottom: 14,
     borderBottomWidth: 1,
     borderBottomColor: "rgba(255,255,255,.10)",
   },
