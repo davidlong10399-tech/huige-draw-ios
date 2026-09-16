@@ -1,6 +1,20 @@
 export const DEFAULT_API_BASE = 'https://pucoding.com';
-export const DEFAULT_IMAGE_MODEL = 'gpt-image-2';
+export const DEFAULT_IMAGE_MODEL = 'gpt-image-2.5-flare';
 export const DEFAULT_ASSISTANT_MODEL = 'claude-sonnet-4-6';
+
+// GPT Image 2.5（2026-09-08 发布）拆成两个模型 ID：
+// - flare：小模型，速度快，官方推荐大多数应用的默认选择
+// - sunburst：基础模型，画质与编辑精度更高，生成更慢
+// 二者与 gpt-image-2 共用同一组端点，主要差异是新增 xhigh/max 画质档位与自定义尺寸规则。
+export const IMAGE_MODEL_PRESETS = [
+  { id: 'gpt-image-2.5-flare', label: '2.5 Flare · 快' },
+  { id: 'gpt-image-2.5-sunburst', label: '2.5 Sunburst · 质' },
+  { id: 'gpt-image-2', label: 'Image 2 · 旧版' },
+] as const;
+
+// gpt-image-2.5 支持 low/medium/high/xhigh/max/auto（xhigh、max 为 2.5 新增；auto 为默认）。
+export const IMAGE_QUALITY_OPTIONS = ['auto', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+export const DEFAULT_IMAGE_QUALITY: (typeof IMAGE_QUALITY_OPTIONS)[number] = 'auto';
 
 export type AssistantResult = { message: string; chips: string[]; model?: string };
 export type GenerateResult = { id?: string; type: 'image'; url: string; localUri?: string; prompt?: string; revised_prompt?: string; elapsed?: number; createdAt?: number };
@@ -311,12 +325,14 @@ function normalizeImageUrl(url: string, baseUrl: string) {
   return url;
 }
 
-// 比例 × 分辨率 → 实际像素。中转站已支持 2K/4K。
+// 比例 × 分辨率 → 实际像素。对齐 gpt-image-2.5 尺寸规则：
+// 每条边必须是 16 的倍数、单边 ≤ 3840px、长短边比例 ≤ 3:1、
+// 总像素需在 655,360–8,294,400 之间（超过 2560x1440 属实验性，仍可请求）。
 // resolution: 'std'(标准 1K) | '2k' | '4k'
 const SIZE_TABLE: Record<string, Record<string, string>> = {
-  std: { '1:1': '1024x1024', '3:4': '1024x1365', '4:3': '1365x1024', '16:9': '1792x1024', '9:16': '1024x1792' },
+  std: { '1:1': '1024x1024', '3:4': '864x1152', '4:3': '1152x864', '16:9': '1792x1008', '9:16': '1008x1792' },
   '2k': { '1:1': '2048x2048', '3:4': '1536x2048', '4:3': '2048x1536', '16:9': '2560x1440', '9:16': '1440x2560' },
-  '4k': { '1:1': '4096x4096', '3:4': '3072x4096', '4:3': '4096x3072', '16:9': '3840x2160', '9:16': '2160x3840' },
+  '4k': { '1:1': '2880x2880', '3:4': '2160x2880', '4:3': '2880x2160', '16:9': '3840x2160', '9:16': '2160x3840' },
 };
 
 function sizeValue(size: string, resolution = 'std') {
@@ -417,11 +433,22 @@ export async function askAssistant(config: DirectApiConfig, payload: { prompt: s
   return { message, chips, model: config.assistantModel };
 }
 
-export async function generateImage(config: DirectApiConfig, payload: { prompt: string; size: string; resolution?: string; signal?: AbortSignal }) {
+// gpt-image 系列（含 2.5）走 OpenAI Images API 时：
+// - 不接受 response_format，默认即返回 b64_json（asImageUrl 已兼容该形态）；
+// - quality 是请求参数（auto/low/medium/high/xhigh/max），不是提示词里的形容词。
+// 非 gpt-image 模型保持旧行为，不附加 quality。
+function isGptImageModel(model?: string) {
+  return /gpt-image/i.test(String(model || ''));
+}
+
+export async function generateImage(config: DirectApiConfig, payload: { prompt: string; size: string; resolution?: string; quality?: string; signal?: AbortSignal }) {
   const baseUrl = normalizeBaseUrl(config.apiBase);
   const px = sizeValue(payload.size, payload.resolution);
+  const quality = payload.quality?.trim();
+  const body: Record<string, unknown> = { model: config.imageModel, prompt: payload.prompt, n: 1, size: px };
+  if (isGptImageModel(config.imageModel) && quality) body.quality = quality;
   const attempts = [
-    { path: '/v1/images/generations', body: { model: config.imageModel, prompt: payload.prompt, n: 1, size: px, response_format: 'b64_json' } },
+    { path: '/v1/images/generations', body },
     { path: '/v1/images/generate', body: { model: config.imageModel, prompt: payload.prompt, size: px } },
   ];
   let lastErr = '';
@@ -438,9 +465,10 @@ export async function generateImage(config: DirectApiConfig, payload: { prompt: 
   throw new Error(lastErr || 'Generate API failed');
 }
 
-export async function editImage(config: DirectApiConfig, payload: { prompt: string; size: string; images: RefImage[]; resolution?: string; signal?: AbortSignal }) {
+export async function editImage(config: DirectApiConfig, payload: { prompt: string; size: string; images: RefImage[]; resolution?: string; quality?: string; signal?: AbortSignal }) {
   if (!payload.images?.length) throw new Error('参考图编辑需要先上传图片');
   const baseUrl = normalizeBaseUrl(config.apiBase);
+  const quality = payload.quality?.trim();
   let lastErr = '';
   for (const ep of ['/v1/images/edits', '/v1/images/edit']) {
     const form = new FormData();
@@ -448,7 +476,7 @@ export async function editImage(config: DirectApiConfig, payload: { prompt: stri
     form.append('prompt', payload.prompt);
     form.append('size', sizeValue(payload.size, payload.resolution));
     form.append('n', '1');
-    form.append('response_format', 'b64_json');
+    if (isGptImageModel(config.imageModel) && quality) form.append('quality', quality);
     payload.images.forEach((img, i) => {
       form.append('image', { uri: img.uri, name: img.name || `ref-${i + 1}.png`, type: img.mimeType || 'image/png' } as any);
     });
@@ -472,7 +500,7 @@ export async function editImage(config: DirectApiConfig, payload: { prompt: stri
 }
 
 export async function optimizePrompt(config: DirectApiConfig, prompt: string) {
-  const system = '你是专业AI绘图提示词优化师。把用户输入优化成适合 gpt-image-2 的中文绘图提示词。输出一段可直接用于生图的中文提示词，包含主体、构图、光影、材质、背景、画质、镜头，不解释，不编号。';
+  const system = '你是专业AI绘图提示词优化师。把用户输入优化成适合 GPT Image 系列（gpt-image-2.5 / gpt-image-2）的中文绘图提示词。输出一段可直接用于生图的中文提示词，包含主体、构图、光影、材质、背景、画质、镜头，不解释，不编号。';
   let lastErr = '';
   for (const path of ['/v1/prompt/optimize', '/v1/prompts/optimize']) {
     try {

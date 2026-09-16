@@ -38,8 +38,11 @@ import {
   DEFAULT_API_BASE,
   DEFAULT_ASSISTANT_MODEL,
   DEFAULT_IMAGE_MODEL,
+  DEFAULT_IMAGE_QUALITY,
   DirectApiConfig,
   GenerateResult,
+  IMAGE_MODEL_PRESETS,
+  IMAGE_QUALITY_OPTIONS,
   optimizePrompt,
   RefImage,
 } from "./src/lib/api";
@@ -52,6 +55,7 @@ type SavedConfig = {
   imageApiBase?: string;
   imageApiKey?: string;
   imageModel?: string;
+  imageQuality?: string;
   textApiBase?: string;
   textApiKey?: string;
   textModel?: string;
@@ -318,6 +322,7 @@ export default function App() {
   const [imageApiBase, setImageApiBase] = useState(DEFAULT_IMAGE_API_BASE);
   const [imageApiKey, setImageApiKey] = useState(DEFAULT_IMAGE_API_KEY);
   const [imageModel, setImageModel] = useState(DEFAULT_IMAGE_MODEL_VALUE);
+  const [imageQuality, setImageQuality] = useState<string>(DEFAULT_IMAGE_QUALITY);
   const [textApiBase, setTextApiBase] = useState(DEFAULT_TEXT_API_BASE);
   const [textApiKey, setTextApiKey] = useState(DEFAULT_TEXT_API_KEY);
   const [textModel, setTextModel] = useState(DEFAULT_TEXT_MODEL_VALUE);
@@ -424,7 +429,17 @@ export default function App() {
               : savedImageBase,
           );
           setImageApiKey(savedImageKey || DEFAULT_IMAGE_API_KEY);
-          setImageModel(c.imageModel || DEFAULT_IMAGE_MODEL_VALUE);
+          // 旧存档默认模型 gpt-image-2 自动迁移到 2.5 默认（flare）；
+          // 用户自定义过的其它模型名保持不动，预设里仍可一键切回旧版。
+          const savedModel =
+            c.imageModel && c.imageModel !== "gpt-image-2"
+              ? c.imageModel
+              : DEFAULT_IMAGE_MODEL_VALUE;
+          setImageModel(savedModel);
+          const savedQuality = (IMAGE_QUALITY_OPTIONS as readonly string[]).includes(c.imageQuality || "")
+            ? (c.imageQuality as string)
+            : DEFAULT_IMAGE_QUALITY;
+          setImageQuality(savedQuality);
           setTextApiBase(
             shouldReplaceOldDefaultBase(savedTextBase, savedTextKey)
               ? DEFAULT_TEXT_API_BASE
@@ -469,6 +484,7 @@ export default function App() {
         imageApiBase,
         imageApiKey,
         imageModel,
+        imageQuality,
         textApiBase,
         textApiKey,
         textModel,
@@ -481,6 +497,7 @@ export default function App() {
     imageApiBase,
     imageApiKey,
     imageModel,
+    imageQuality,
     textApiBase,
     textApiKey,
     textModel,
@@ -675,10 +692,11 @@ export default function App() {
               prompt: fullPrompt,
               size,
               resolution,
+              quality: imageQuality,
               images: refs,
               signal: controller.signal,
             })
-          : await generateImage(imageConfig, { prompt: fullPrompt, size, resolution, signal: controller.signal });
+          : await generateImage(imageConfig, { prompt: fullPrompt, size, resolution, quality: imageQuality, signal: controller.signal });
       const item: GenerateResult = {
         ...raw,
         id: makeId(),
@@ -1061,25 +1079,54 @@ export default function App() {
                   </ScrollView>
                 </View>
 
-                <View style={[styles.toolRail, styles.toolRailLast]}>
-                  <Text style={styles.railLabel}>清晰度</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.optionRow}>
-                    {resolutionOptions.map((r) => {
-                      const active = resolution === r.key;
-                      return (
-                        <Pressable
-                          key={r.key}
-                          style={[styles.miniChip, active && styles.miniChipActive]}
-                          onPress={() => setResolution(r.key)}
-                        >
-                          <Text style={active ? styles.miniChipTextActive : styles.miniChipText}>
-                            {r.label}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                  </ScrollView>
-                </View>
+                {(() => {
+                  const qualityVisible = /gpt-image/i.test(imageModel);
+                  return (
+                    <>
+                      <View style={[styles.toolRail, !qualityVisible && styles.toolRailLast]}>
+                        <Text style={styles.railLabel}>清晰度</Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.optionRow}>
+                          {resolutionOptions.map((r) => {
+                            const active = resolution === r.key;
+                            return (
+                              <Pressable
+                                key={r.key}
+                                style={[styles.miniChip, active && styles.miniChipActive]}
+                                onPress={() => setResolution(r.key)}
+                              >
+                                <Text style={active ? styles.miniChipTextActive : styles.miniChipText}>
+                                  {r.label}
+                                </Text>
+                              </Pressable>
+                            );
+                          })}
+                        </ScrollView>
+                      </View>
+                      {qualityVisible && (
+                        <View style={[styles.toolRail, styles.toolRailLast]}>
+                          <Text style={styles.railLabel}>画质</Text>
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.optionRow}>
+                            {IMAGE_QUALITY_OPTIONS.map((q) => {
+                              const active = imageQuality === q;
+                              const label = q === "xhigh" ? "超精" : q === "max" ? "极致" : q === "high" ? "高" : q === "medium" ? "中" : q === "low" ? "低" : "自动";
+                              return (
+                                <Pressable
+                                  key={q}
+                                  style={[styles.miniChip, active && styles.miniChipActive]}
+                                  onPress={() => setImageQuality(q)}
+                                >
+                                  <Text style={active ? styles.miniChipTextActive : styles.miniChipText}>
+                                    {label}
+                                  </Text>
+                                </Pressable>
+                              );
+                            })}
+                          </ScrollView>
+                        </View>
+                      )}
+                    </>
+                  );
+                })()}
 
                 {!!refs.length && (
                   <View style={styles.refStrip}>
@@ -1223,6 +1270,7 @@ export default function App() {
                           setImageApiBase(DEFAULT_IMAGE_API_BASE);
                           setImageApiKey(DEFAULT_IMAGE_API_KEY);
                           setImageModel(DEFAULT_IMAGE_MODEL_VALUE);
+                          setImageQuality(DEFAULT_IMAGE_QUALITY);
                         }}
                       >
                         <Text style={styles.presetText}>BeeHears</Text>
@@ -1272,6 +1320,22 @@ export default function App() {
                         value={imageModel}
                         onChangeText={setImageModel}
                       />
+                    </View>
+                    <View style={styles.presets}>
+                      {IMAGE_MODEL_PRESETS.map((m) => {
+                        const active = imageModel === m.id;
+                        return (
+                          <Pressable
+                            key={m.id}
+                            style={[styles.preset, active && styles.presetActive]}
+                            onPress={() => setImageModel(m.id)}
+                          >
+                            <Text style={[styles.presetText, active && styles.presetTextActive]}>
+                              {m.label}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
                     </View>
                   </View>
                 )}
@@ -2819,7 +2883,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 7,
   },
+  presetActive: {
+    backgroundColor: "rgba(142,162,255,.18)",
+    borderColor: "rgba(142,162,255,.48)",
+  },
   presetText: { color: C.ink, fontSize: 12, fontWeight: "900" },
+  presetTextActive: { color: C.purple, fontSize: 12, fontWeight: "900" },
   field: { flexDirection: "row", alignItems: "center", gap: 9, marginTop: 10 },
   fieldLabel: { width: 44, color: C.muted, fontSize: 12, fontWeight: "900" },
   fieldInput: {
