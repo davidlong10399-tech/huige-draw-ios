@@ -59,6 +59,7 @@ type SavedConfig = {
   textApiBase?: string;
   textApiKey?: string;
   textModel?: string;
+  style?: string;
   showSettings?: boolean;
   apiBase?: string;
   apiKey?: string;
@@ -88,76 +89,52 @@ const DEFAULT_TEXT_MODEL_VALUE =
 const DEFAULT_PROMPT_PLAZA_URL =
   process.env.EXPO_PUBLIC_HUIGE_PROMPT_PLAZA_URL ||
   "https://evolink.ai/zh/gpt-image-2-prompts";
-const stylesList = [
-  "商业海报",
-  "真实自拍",
-  "电影感",
-  "真实摄影",
-  "国潮",
-  "产品摄影",
-  "赛博朋克",
-];
-const stylePrompts: Record<string, string> = {
-  商业海报: "商业海报设计，强视觉冲击，高级排版，真实光影",
-  真实自拍: "真实手机自拍照，前置摄像头视角，自然肤质与毛孔细节，随手抓拍的生活感，轻微噪点与真实光线，非专业摆拍，朋友圈日常质感",
-  电影感: "电影感构图，戏剧化光影，浅景深，色彩分级",
-  真实摄影: "真实摄影，自然光影，细节丰富，高分辨率",
-  国潮: "国潮东方美学，红金色调，精致纹样",
-  产品摄影: "高端产品摄影，棚拍灯光，极简背景",
-  赛博朋克: "雨夜霓虹，赛博朋克城市，湿润地面反光，高细节",
+// —— 风格模块 · 单一数据源 ——
+// 说明：风格定义、展示卡片、提示词映射三处曾各维护一份风格名列表，
+// 靠字符串字面量隐式对齐，一旦改名或存档脏数据就会静默丢失风格。
+// 现统一收敛到 STYLE_DEFS，新增/删除风格只需改这一个数组。
+// NO_STYLE 是显式哨兵值，代表“不叠加任何风格”（prompt 为空串），
+// 避免用空串或 undefined 表达同一语义造成分支混乱。
+const NO_STYLE = "无风格";
+const DEFAULT_STYLE = "商业海报";
+
+type StyleDef = {
+  /** 唯一键，同时作为存档值 */
+  name: string;
+  /** 卡片主标题 */
+  title: string;
+  /** 卡片副标题 */
+  sub: string;
+  /** Ionicons 图标名 */
+  icon: string;
+  /** 卡片主题色 */
+  accent: string;
+  /** 叠加到用户提示词后的风格描述，无风格为空串 */
+  prompt: string;
 };
 
-const styleShowcase = [
-  {
-    name: "商业海报",
-    title: "商业",
-    sub: "主图广告",
-    icon: "storefront-outline",
-    accent: "#F6C96D",
-  },
-  {
-    name: "真实自拍",
-    title: "自拍",
-    sub: "生活质感",
-    icon: "camera-outline",
-    accent: "#A78BFA",
-  },
-  {
-    name: "电影感",
-    title: "电影",
-    sub: "光影叙事",
-    icon: "film-outline",
-    accent: "#60A5FA",
-  },
-  {
-    name: "真实摄影",
-    title: "摄影",
-    sub: "自然真实",
-    icon: "aperture-outline",
-    accent: "#5EEAD4",
-  },
-  {
-    name: "国潮",
-    title: "国潮",
-    sub: "东方纹样",
-    icon: "color-palette-outline",
-    accent: "#FB7185",
-  },
-  {
-    name: "产品摄影",
-    title: "产品",
-    sub: "棚拍质感",
-    icon: "cube-outline",
-    accent: "#93C5FD",
-  },
-  {
-    name: "赛博朋克",
-    title: "赛博",
-    sub: "霓虹未来",
-    icon: "flash-outline",
-    accent: "#C084FC",
-  },
-] as const;
+// “无风格”置于最前，便于一键取消风格叠加
+const STYLE_DEFS: StyleDef[] = [
+  { name: NO_STYLE, title: "无", sub: "原生提示词", icon: "remove-circle-outline", accent: "#94A3B8", prompt: "" },
+  { name: "商业海报", title: "商业", sub: "主图广告", icon: "storefront-outline", accent: "#F6C96D", prompt: "商业海报设计，强视觉冲击，高级排版，真实光影" },
+  { name: "真实自拍", title: "自拍", sub: "生活质感", icon: "camera-outline", accent: "#A78BFA", prompt: "真实手机自拍照，前置摄像头视角，自然肤质与毛孔细节，随手抓拍的生活感，轻微噪点与真实光线，非专业摆拍，朋友圈日常质感" },
+  { name: "电影感", title: "电影", sub: "光影叙事", icon: "film-outline", accent: "#60A5FA", prompt: "电影感构图，戏剧化光影，浅景深，色彩分级" },
+  { name: "真实摄影", title: "摄影", sub: "自然真实", icon: "aperture-outline", accent: "#5EEAD4", prompt: "真实摄影，自然光影，细节丰富，高分辨率" },
+  { name: "国潮", title: "国潮", sub: "东方纹样", icon: "color-palette-outline", accent: "#FB7185", prompt: "国潮东方美学，红金色调，精致纹样" },
+  { name: "产品摄影", title: "产品", sub: "棚拍质感", icon: "cube-outline", accent: "#93C5FD", prompt: "高端产品摄影，棚拍灯光，极简背景" },
+  { name: "赛博朋克", title: "赛博", sub: "霓虹未来", icon: "flash-outline", accent: "#C084FC", prompt: "雨夜霓虹，赛博朋克城市，湿润地面反光，高细节" },
+];
+
+/** 取风格对应的提示词片段。未知风格名统一返回空串（不叠加），避免静默半失效 */
+function stylePromptOf(name: string): string {
+  return STYLE_DEFS.find((s) => s.name === name)?.prompt ?? "";
+}
+
+/** 校验存档中的风格名是否仍然有效，用于防御改名/删风格后的幽灵值 */
+function isKnownStyle(name: unknown): name is string {
+  return typeof name === "string" && STYLE_DEFS.some((s) => s.name === name);
+}
+
 
 const sizeOptions = [
   { key: "1:1", label: "方图" },
@@ -341,7 +318,7 @@ export default function App() {
   const [prompt, setPrompt] = useState("");
   const [size, setSize] = useState("1:1");
   const [resolution, setResolution] = useState("std");
-  const [style, setStyle] = useState("商业海报");
+  const [style, setStyle] = useState(DEFAULT_STYLE);
   const [refs, setRefs] = useState<RefImage[]>([]);
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -377,7 +354,7 @@ export default function App() {
     [textApiBase, textApiKey, imageModel, textModel],
   );
   const fullPrompt = useMemo(
-    () => [prompt.trim(), stylePrompts[style] || ""].filter(Boolean).join("，"),
+    () => [prompt.trim(), stylePromptOf(style)].filter(Boolean).join("，"),
     [prompt, style],
   );
   const maskedImageKey = imageApiKey
@@ -449,6 +426,9 @@ export default function App() {
           setTextModel(
             c.textModel || c.assistantModel || DEFAULT_TEXT_MODEL_VALUE,
           );
+          // 风格持久化：旧存档无此字段时回落到默认值；
+          // 存档值若已失效（风格被改名/删除）同样回落，避免幽灵值导致风格静默丢失。
+          setStyle(isKnownStyle(c.style) ? c.style : DEFAULT_STYLE);
           setPromptPlazaUrl(c.promptPlazaUrl || DEFAULT_PROMPT_PLAZA_URL);
           setShowSettings(c.showSettings ?? false);
         }
@@ -488,6 +468,7 @@ export default function App() {
         textApiBase,
         textApiKey,
         textModel,
+        style,
         promptPlazaUrl,
         showSettings,
       }),
@@ -501,6 +482,7 @@ export default function App() {
     textApiBase,
     textApiKey,
     textModel,
+    style,
     promptPlazaUrl,
     showSettings,
   ]);
@@ -1016,7 +998,7 @@ export default function App() {
                 </Pressable>
               </View>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.styleShowcaseRow}>
-                {styleShowcase.map((item) => {
+                {STYLE_DEFS.map((item) => {
                   const active = style === item.name;
                   return (
                     <Pressable
