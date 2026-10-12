@@ -9,7 +9,6 @@ import {
   Alert,
   Image,
   KeyboardAvoidingView,
-  Linking,
   Modal,
   Platform,
   Pressable,
@@ -30,6 +29,7 @@ import { StatusBar } from "expo-status-bar";
 import { useKeepAwake } from "expo-keep-awake";
 import * as Clipboard from "expo-clipboard";
 import { Ionicons } from "@expo/vector-icons";
+import { WebView } from "react-native-webview";
 import {
   askAssistant,
   editImage,
@@ -88,7 +88,8 @@ const DEFAULT_TEXT_MODEL_VALUE =
   process.env.EXPO_PUBLIC_HUIGE_TEXT_MODEL || DEFAULT_ASSISTANT_MODEL;
 const DEFAULT_PROMPT_PLAZA_URL =
   process.env.EXPO_PUBLIC_HUIGE_PROMPT_PLAZA_URL ||
-  "https://evolink.ai/zh/gpt-image-2-prompts";
+  "https://opennana.com/awesome-prompt-gallery";
+const LEGACY_PROMPT_PLAZA_URL = "https://evolink.ai/zh/gpt-image-2-prompts";
 // —— 风格模块 · 单一数据源 ——
 // 说明：风格定义、展示卡片、提示词映射三处曾各维护一份风格名列表，
 // 靠字符串字面量隐式对齐，一旦改名或存档脏数据就会静默丢失风格。
@@ -330,6 +331,8 @@ export default function App() {
   const [results, setResults] = useState<GenerateResult[]>([]);
   const [selected, setSelected] = useState<GenerateResult | null>(null);
   const [showPromptPlaza, setShowPromptPlaza] = useState(false);
+  const [showPromptPlazaWeb, setShowPromptPlazaWeb] = useState(false);
+  const [promptPlazaWebError, setPromptPlazaWebError] = useState(false);
   const [showGenerationPage, setShowGenerationPage] = useState(false);
   const [galleryFilter, setGalleryFilter] = useState<"all" | "recent" | "fast">("all");
   const progressTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -429,7 +432,11 @@ export default function App() {
           // 风格持久化：旧存档无此字段时回落到默认值；
           // 存档值若已失效（风格被改名/删除）同样回落，避免幽灵值导致风格静默丢失。
           setStyle(isKnownStyle(c.style) ? c.style : DEFAULT_STYLE);
-          setPromptPlazaUrl(c.promptPlazaUrl || DEFAULT_PROMPT_PLAZA_URL);
+          setPromptPlazaUrl(
+            c.promptPlazaUrl && c.promptPlazaUrl !== LEGACY_PROMPT_PLAZA_URL
+              ? c.promptPlazaUrl
+              : DEFAULT_PROMPT_PLAZA_URL,
+          );
           setShowSettings(c.showSettings ?? false);
         }
         const h = await AsyncStorage.getItem(HISTORY_KEY);
@@ -637,12 +644,16 @@ export default function App() {
     setTab("create");
   }
 
-  async function openPromptPlazaUrl() {
+  function openPromptPlazaUrl() {
     const url = promptPlazaUrl.trim();
-    if (!url) return Alert.alert("未配置提示词广场", "可以先使用内置精选，也可以在设置里填外部提示词广场地址。");
-    const canOpen = await Linking.canOpenURL(url).catch(() => false);
-    if (!canOpen) return Alert.alert("无法打开", "请检查提示词广场地址是否正确。");
-    await Linking.openURL(url);
+    if (!url) return Alert.alert("未配置提示词广场", "请在设置里填写提示词广场地址。");
+    setPromptPlazaWebError(false);
+    setShowPromptPlazaWeb(true);
+  }
+
+  function closePromptPlaza() {
+    setShowPromptPlazaWeb(false);
+    setShowPromptPlaza(false);
   }
 
   function cancelGenerate() {
@@ -1514,39 +1525,79 @@ export default function App() {
         <Modal
           visible={showPromptPlaza}
           animationType="slide"
-          onRequestClose={() => setShowPromptPlaza(false)}
+          onRequestClose={closePromptPlaza}
         >
           <SafeAreaView style={styles.modalSafe}>
-            <View style={styles.plazaModalHeader}>
-              <View>
-                <Text style={styles.plazaModalKicker}>PROMPT PLAZA</Text>
-                <Text style={styles.plazaModalTitle}>提示词广场</Text>
-              </View>
-              <Pressable style={styles.modalCloseSmall} onPress={() => setShowPromptPlaza(false)}>
-                <Ionicons name="close" size={22} color={C.ink} />
-              </Pressable>
-            </View>
-            <ScrollView contentContainerStyle={styles.plazaModalBody}>
-              <Pressable style={styles.externalPlazaCard} onPress={openPromptPlazaUrl}>
-                <View>
-                  <Text style={styles.externalPlazaTitle}>外接提示词广场</Text>
-                  <Text style={styles.externalPlazaSub}>
-                    {promptPlazaUrl.trim() || "在「我的配置」里填 URL 后可打开外部广场"}
-                  </Text>
-                </View>
-                <Ionicons name="open-outline" size={20} color={C.purple} />
-              </Pressable>
-              {promptPlaza.map((item) => (
-                <Pressable key={item.title} style={styles.plazaItem} onPress={() => applyPromptPreset(item)}>
-                  <View style={styles.plazaItemTop}>
-                    <Text style={styles.plazaItemTag}>{item.tag}</Text>
-                    <Text style={styles.plazaItemStyle}>{item.style}</Text>
+            {!showPromptPlazaWeb ? (
+              <>
+                <View style={styles.plazaModalHeader}>
+                  <View>
+                    <Text style={styles.plazaModalKicker}>PROMPT PLAZA</Text>
+                    <Text style={styles.plazaModalTitle}>提示词广场</Text>
                   </View>
-                  <Text style={styles.plazaItemTitle}>{item.title}</Text>
-                  <Text style={styles.plazaItemPrompt}>{item.prompt}</Text>
-                </Pressable>
-              ))}
-            </ScrollView>
+                  <Pressable style={styles.modalCloseSmall} onPress={closePromptPlaza}>
+                    <Ionicons name="close" size={22} color={C.ink} />
+                  </Pressable>
+                </View>
+                <ScrollView contentContainerStyle={styles.plazaModalBody}>
+                  <Pressable style={styles.externalPlazaCard} onPress={openPromptPlazaUrl}>
+                    <View>
+                      <Text style={styles.externalPlazaTitle}>在 App 内打开提示词广场</Text>
+                      <Text style={styles.externalPlazaSub}>
+                        {promptPlazaUrl.trim() || "请在设置里填写提示词广场地址"}
+                      </Text>
+                    </View>
+                    <Ionicons name="globe-outline" size={20} color={C.purple} />
+                  </Pressable>
+                  {promptPlaza.map((item) => (
+                    <Pressable key={item.title} style={styles.plazaItem} onPress={() => applyPromptPreset(item)}>
+                      <View style={styles.plazaItemTop}>
+                        <Text style={styles.plazaItemTag}>{item.tag}</Text>
+                        <Text style={styles.plazaItemStyle}>{item.style}</Text>
+                      </View>
+                      <Text style={styles.plazaItemTitle}>{item.title}</Text>
+                      <Text style={styles.plazaItemPrompt}>{item.prompt}</Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </>
+            ) : (
+              <View style={styles.promptWebWrap}>
+                <View style={styles.promptWebHeader}>
+                  <Pressable style={styles.promptWebBack} onPress={() => setShowPromptPlazaWeb(false)}>
+                    <Ionicons name="chevron-back" size={22} color={C.ink} />
+                    <Text style={styles.promptWebBackText}>返回</Text>
+                  </Pressable>
+                  <Text style={styles.promptWebTitle} numberOfLines={1}>提示词广场</Text>
+                  <Pressable style={styles.promptWebClose} onPress={closePromptPlaza}>
+                    <Ionicons name="close" size={22} color={C.ink} />
+                  </Pressable>
+                </View>
+                {promptPlazaWebError ? (
+                  <View style={styles.promptWebError}>
+                    <Ionicons name="cloud-offline-outline" size={42} color={C.purple} />
+                    <Text style={styles.promptWebErrorTitle}>页面加载失败</Text>
+                    <Text style={styles.promptWebErrorText}>请检查网络后重试。</Text>
+                    <Pressable style={styles.promptWebRetry} onPress={() => setPromptPlazaWebError(false)}>
+                      <Text style={styles.promptWebRetryText}>重新加载</Text>
+                    </Pressable>
+                  </View>
+                ) : (
+                  <WebView
+                    source={{ uri: promptPlazaUrl.trim() }}
+                    style={styles.promptWebView}
+                    startInLoadingState
+                    onError={() => setPromptPlazaWebError(true)}
+                    onHttpError={() => setPromptPlazaWebError(true)}
+                    renderLoading={() => (
+                      <View style={styles.promptWebLoading}>
+                        <Text style={styles.promptWebLoadingText}>正在加载提示词广场…</Text>
+                      </View>
+                    )}
+                  />
+                )}
+              </View>
+            )}
           </SafeAreaView>
         </Modal>
       </KeyboardAvoidingView>
@@ -2911,6 +2962,28 @@ const styles = StyleSheet.create({
     paddingBottom: 36,
     gap: 12,
   },
+  promptWebWrap: { flex: 1, backgroundColor: "#070a10" },
+  promptWebHeader: {
+    minHeight: 58,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,.10)",
+  },
+  promptWebBack: { flexDirection: "row", alignItems: "center", gap: 2, minWidth: 76 },
+  promptWebBackText: { color: C.ink, fontSize: 13, fontWeight: "900" },
+  promptWebTitle: { flex: 1, color: C.ink, fontSize: 16, fontWeight: "900", textAlign: "center" },
+  promptWebClose: { width: 76, alignItems: "flex-end" },
+  promptWebView: { flex: 1, backgroundColor: "#fff" },
+  promptWebLoading: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#070a10" },
+  promptWebLoadingText: { color: C.muted, fontSize: 13, fontWeight: "800" },
+  promptWebError: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, backgroundColor: "#070a10" },
+  promptWebErrorTitle: { color: C.ink, fontSize: 18, fontWeight: "900", marginTop: 14 },
+  promptWebErrorText: { color: C.muted, fontSize: 13, fontWeight: "700", marginTop: 7 },
+  promptWebRetry: { marginTop: 18, minWidth: 120, height: 42, paddingHorizontal: 18, borderRadius: 14, backgroundColor: C.purple, alignItems: "center", justifyContent: "center" },
+  promptWebRetryText: { color: C.bg, fontSize: 13, fontWeight: "900" },
   externalPlazaCard: {
     minHeight: 76,
     borderRadius: 18,
