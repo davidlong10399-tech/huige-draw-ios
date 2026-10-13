@@ -9,7 +9,6 @@ import {
   Alert,
   Image,
   KeyboardAvoidingView,
-  Linking,
   Modal,
   Platform,
   Pressable,
@@ -30,6 +29,7 @@ import { StatusBar } from "expo-status-bar";
 import { useKeepAwake } from "expo-keep-awake";
 import * as Clipboard from "expo-clipboard";
 import { Ionicons } from "@expo/vector-icons";
+import { WebView } from "react-native-webview";
 import {
   askAssistant,
   editImage,
@@ -331,10 +331,14 @@ export default function App() {
   const [results, setResults] = useState<GenerateResult[]>([]);
   const [selected, setSelected] = useState<GenerateResult | null>(null);
   const [showPromptPlaza, setShowPromptPlaza] = useState(false);
+  const [showPromptPlazaWeb, setShowPromptPlazaWeb] = useState(false);
+  const [promptPlazaWebError, setPromptPlazaWebError] = useState(false);
+  const [promptPlazaWebLoading, setPromptPlazaWebLoading] = useState(true);
   const [showGenerationPage, setShowGenerationPage] = useState(false);
   const [galleryFilter, setGalleryFilter] = useState<"all" | "recent" | "fast">("all");
   const progressTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const generateAbortRef = useRef<AbortController | null>(null);
+  const plazaWebRef = useRef<WebView>(null);
 
   const imageConfig: DirectApiConfig = useMemo(
     () => ({
@@ -643,12 +647,26 @@ export default function App() {
     setTab("create");
   }
 
-  async function openPromptPlazaUrl() {
+  function openPromptPlazaUrl() {
     const url = promptPlazaUrl.trim();
-    if (!url) return Alert.alert("未配置提示词广场", "可以先使用内置精选，也可以在设置里填外部提示词广场地址。");
-    const canOpen = await Linking.canOpenURL(url).catch(() => false);
-    if (!canOpen) return Alert.alert("无法打开", "请检查提示词广场地址是否正确。");
-    await Linking.openURL(url);
+    if (!url) {
+      return Alert.alert(
+        "未配置提示词广场",
+        "可以先使用内置精选，也可以在设置里填外部提示词广场地址。",
+      );
+    }
+    if (!/^https?:\/\//i.test(url)) {
+      return Alert.alert("无法打开", "提示词广场地址必须以 http:// 或 https:// 开头。");
+    }
+    setPromptPlazaWebError(false);
+    setPromptPlazaWebLoading(true);
+    setShowPromptPlazaWeb(true);
+  }
+
+  function retryPromptPlazaWeb() {
+    setPromptPlazaWebError(false);
+    setPromptPlazaWebLoading(true);
+    plazaWebRef.current?.reload();
   }
 
   function cancelGenerate() {
@@ -1515,6 +1533,70 @@ export default function App() {
                 </View>
               </>
             )}
+          </SafeAreaView>
+        </Modal>
+        <Modal
+          visible={showPromptPlazaWeb}
+          animationType="slide"
+          onRequestClose={() => setShowPromptPlazaWeb(false)}
+        >
+          <SafeAreaView style={styles.promptWebPage}>
+            <View style={styles.plazaModalHeader}>
+              <View>
+                <Text style={styles.plazaModalKicker}>OPENNANA</Text>
+                <Text style={styles.plazaModalTitle}>提示词广场</Text>
+              </View>
+              <Pressable
+                style={styles.modalCloseSmall}
+                accessibilityLabel="关闭提示词广场网页"
+                onPress={() => setShowPromptPlazaWeb(false)}
+              >
+                <Ionicons name="close" size={22} color={C.ink} />
+              </Pressable>
+            </View>
+            <View style={styles.promptWebContainer}>
+              <WebView
+                ref={plazaWebRef}
+                source={{ uri: promptPlazaUrl.trim() }}
+                style={styles.promptWebView}
+                onLoadStart={() => {
+                  setPromptPlazaWebLoading(true);
+                  setPromptPlazaWebError(false);
+                }}
+                onLoadEnd={() => setPromptPlazaWebLoading(false)}
+                onError={() => {
+                  setPromptPlazaWebLoading(false);
+                  setPromptPlazaWebError(true);
+                }}
+                onHttpError={(event) => {
+                  if (event.nativeEvent.statusCode >= 400) {
+                    setPromptPlazaWebLoading(false);
+                    setPromptPlazaWebError(true);
+                  }
+                }}
+                onShouldStartLoadWithRequest={(request) =>
+                  /^https?:\/\//i.test(request.url)
+                }
+                javaScriptEnabled
+                domStorageEnabled
+                startInLoadingState
+              />
+              {promptPlazaWebLoading && !promptPlazaWebError && (
+                <View style={styles.promptWebOverlay}>
+                  <Text style={styles.promptWebMessage}>正在加载提示词广场…</Text>
+                </View>
+              )}
+              {promptPlazaWebError && (
+                <View style={styles.promptWebError}>
+                  <Ionicons name="cloud-offline-outline" size={36} color={C.muted} />
+                  <Text style={styles.promptWebErrorTitle}>网页暂时无法加载</Text>
+                  <Text style={styles.promptWebMessage}>请检查网络连接后重试，或关闭页面使用内置精选。</Text>
+                  <Pressable style={styles.promptWebRetry} onPress={retryPromptPlazaWeb}>
+                    <Text style={styles.promptWebRetryText}>重新加载</Text>
+                  </Pressable>
+                </View>
+              )}
+            </View>
           </SafeAreaView>
         </Modal>
         <Modal
@@ -2890,6 +2972,26 @@ const styles = StyleSheet.create({
     color: C.ink,
     fontSize: 14,
   },
+  promptWebPage: { flex: 1, backgroundColor: C.bg },
+  promptWebContainer: { flex: 1, position: "relative", backgroundColor: "#FFFFFF" },
+  promptWebView: { flex: 1, backgroundColor: "#FFFFFF" },
+  promptWebOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+  },
+  promptWebError: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 28,
+    backgroundColor: C.bg,
+  },
+  promptWebMessage: { color: C.muted, fontSize: 13, lineHeight: 20, textAlign: "center", maxWidth: 300 },
+  promptWebErrorTitle: { color: C.ink, fontSize: 18, fontWeight: "900", marginTop: 12, marginBottom: 8 },
+  promptWebRetry: { marginTop: 18, borderRadius: 999, paddingHorizontal: 20, paddingVertical: 11, backgroundColor: C.purple },
+  promptWebRetryText: { color: "#111827", fontSize: 13, fontWeight: "900" },
   plazaModalHeader: {
     paddingTop: Platform.OS === "ios" ? 14 : 8,
     paddingHorizontal: 18,
