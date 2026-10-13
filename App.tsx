@@ -88,7 +88,8 @@ const DEFAULT_TEXT_MODEL_VALUE =
   process.env.EXPO_PUBLIC_HUIGE_TEXT_MODEL || DEFAULT_ASSISTANT_MODEL;
 const DEFAULT_PROMPT_PLAZA_URL =
   process.env.EXPO_PUBLIC_HUIGE_PROMPT_PLAZA_URL ||
-  "https://evolink.ai/zh/gpt-image-2-prompts";
+  "https://opennana.com/awesome-prompt-gallery";
+const LEGACY_PROMPT_PLAZA_URL = "https://evolink.ai/zh/gpt-image-2-prompts";
 // —— 风格模块 · 单一数据源 ——
 // 说明：风格定义、展示卡片、提示词映射三处曾各维护一份风格名列表，
 // 靠字符串字面量隐式对齐，一旦改名或存档脏数据就会静默丢失风格。
@@ -429,7 +430,12 @@ export default function App() {
           // 风格持久化：旧存档无此字段时回落到默认值；
           // 存档值若已失效（风格被改名/删除）同样回落，避免幽灵值导致风格静默丢失。
           setStyle(isKnownStyle(c.style) ? c.style : DEFAULT_STYLE);
-          setPromptPlazaUrl(c.promptPlazaUrl || DEFAULT_PROMPT_PLAZA_URL);
+          const savedPromptPlazaUrl = nonEmpty(c.promptPlazaUrl);
+          setPromptPlazaUrl(
+            !savedPromptPlazaUrl || savedPromptPlazaUrl === LEGACY_PROMPT_PLAZA_URL
+              ? DEFAULT_PROMPT_PLAZA_URL
+              : savedPromptPlazaUrl,
+          );
           setShowSettings(c.showSettings ?? false);
         }
         const h = await AsyncStorage.getItem(HISTORY_KEY);
