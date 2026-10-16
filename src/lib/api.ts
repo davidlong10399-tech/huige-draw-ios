@@ -583,6 +583,16 @@ async function generateImageGemini(config: DirectApiConfig, payload: { prompt: s
         const mime = inline.mimeType || inline.mime_type || 'image/png';
         return { type: 'image', url: `data:${mime};base64,${b64}` };
       }
+      // 部分 Gemini 中转站不回 inlineData，而是把生成图片放在 fileData.fileUri；
+      // 也有实现同时在 text 中返回同一 HTTP 图片地址。
+      const fileData = p?.fileData || p?.file_data;
+      const fileUri = fileData?.fileUri || fileData?.file_uri;
+      if (typeof fileUri === 'string' && /^https?:\/\//i.test(fileUri.trim())) {
+        return { type: 'image', url: fileUri.trim() };
+      }
+      if (typeof p?.text === 'string' && /^https?:\/\/\S+$/i.test(p.text.trim())) {
+        return { type: 'image', url: p.text.trim() };
+      }
     }
   }
   // 兜底：个别中转网关会把 Gemini 结果包装成 b64_json / url 结构。

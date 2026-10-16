@@ -1497,7 +1497,7 @@ export default function App() {
                         <Text style={styles.modelPickTitle}>
                           勾选需要出现在创作工具里的模型
                         </Text>
-                        <ScrollView style={styles.modelPickScroll} nestedScrollEnabled>
+                        <View>
                           {fetchedImageModels.map((id) => {
                             const checked = imageModelOptions.some((m) => m.id === id);
                             return (
@@ -1517,7 +1517,7 @@ export default function App() {
                               </Pressable>
                             );
                           })}
-                        </ScrollView>
+                        </View>
                       </View>
                     )}
                     <View style={styles.presets}>
