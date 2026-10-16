@@ -519,6 +519,38 @@ function isGptImageModel(model?: string) {
 // 图片从 candidates[].content.parts[].inlineData.data（base64）解析。
 async function generateImageGemini(config: DirectApiConfig, payload: { prompt: string; size: string; signal?: AbortSignal; images?: RefImage[] }): Promise<GenerateResult> {
   const baseUrl = normalizeGeminiBaseUrl(config.apiBase);
+  // Imagen 使用 predict 协议；当前接口只支持文生图，参考图编辑交给 Gemini image 模型。
+  if (/^imagen/i.test(config.imageModel)) {
+    if (payload.images?.length) {
+      throw new Error('Imagen 模型不支持当前参考图编辑协议，请选择 gemini-*-image 模型');
+    }
+    const body = {
+      instances: [{ prompt: payload.prompt }],
+      parameters: {
+        sampleCount: 1,
+        aspectRatio: /^\d+:\d+$/.test(payload.size) ? payload.size : '1:1',
+      },
+    };
+    const res = await fetchWithTimeout(`${baseUrl}/v1beta/models/${encodeURIComponent(config.imageModel)}:predict`, {
+      method: 'POST',
+      headers: geminiHeaders(config),
+      body: JSON.stringify(body),
+      signal: payload.signal,
+    });
+    const text = await res.text();
+    let json: any = {};
+    try { json = text ? JSON.parse(text) : {}; } catch { json = { raw: text }; }
+    if (!res.ok || json.error) throw new Error(json.error?.message || json.error || json.raw || `HTTP ${res.status}`);
+    const prediction = Array.isArray(json.predictions) ? json.predictions[0] : undefined;
+    const b64 = prediction?.bytesBase64Encoded || prediction?.bytes_base64_encoded || prediction?.b64_json;
+    if (typeof b64 === 'string' && b64) {
+      const mime = prediction?.mimeType || prediction?.mime_type || 'image/png';
+      return { type: 'image', url: `data:${mime};base64,${b64}` };
+    }
+    (json as any).baseUrl = baseUrl;
+    return assertImageResult(json);
+  }
+
   const parts: Record<string, unknown>[] = [];
   for (const img of payload.images || []) {
     const data = await readAsBase64(img.uri);
@@ -564,29 +596,22 @@ export async function generateImage(config: DirectApiConfig, payload: { prompt: 
   const baseUrl = normalizeBaseUrl(config.apiBase);
   const px = sizeValue(payload.size, payload.resolution);
   const quality = payload.quality?.trim();
-  const body: Record<string, unknown> = { model: config.imageModel, prompt: payload.prompt, n: 1, size: px };
-  if (isGptImageModel(config.imageModel) && quality) body.quality = quality;
-  // Grok 官方 Images API 不接受 size/quality，先带参数请求，被拒后降级重试一次。
-  const grokFallback = /grok/i.test(config.imageModel)
-    ? [{ path: '/v1/images/generations', body: { model: config.imageModel, prompt: payload.prompt, n: 1 } }]
-    : [];
-  const attempts = [
-    { path: '/v1/images/generations', body },
-    ...grokFallback,
-    { path: '/v1/images/generate', body: { model: config.imageModel, prompt: payload.prompt, size: px } },
-  ];
-  let lastErr = '';
-  for (const attempt of attempts) {
-    try {
-      const data = await apiPost(config, attempt.path, attempt.body, payload.signal);
-      (data as any).baseUrl = baseUrl;
-      return assertImageResult(data);
-    } catch (e: any) {
-      lastErr = String(e?.message || e);
-      if (!/404|not found|unsupported|not compatible|invalid|not support/i.test(lastErr)) throw e;
-    }
+  const isGrok = /grok/i.test(config.imageModel);
+  // OpenAI Images 与 xAI Grok 都使用唯一标准端点 /v1/images/generations。
+  // Grok 不接受 OpenAI 的 size/quality 参数，因此只发送 model/prompt/n。
+  // 不再尝试非标准 /v1/images/generate，避免其 Invalid URL 覆盖真实错误。
+  const body: Record<string, unknown> = isGrok
+    ? { model: config.imageModel, prompt: payload.prompt, n: 1 }
+    : { model: config.imageModel, prompt: payload.prompt, n: 1, size: px };
+  if (!isGrok && isGptImageModel(config.imageModel) && quality) body.quality = quality;
+  try {
+    const data = await apiPost(config, '/v1/images/generations', body, payload.signal);
+    (data as any).baseUrl = baseUrl;
+    return assertImageResult(data);
+  } catch (e: any) {
+    const message = String(e?.message || e);
+    throw new Error(`${message}（POST /v1/images/generations，模型 ${config.imageModel}）`);
   }
-  throw new Error(lastErr || 'Generate API failed');
 }
 
 export async function editImage(config: DirectApiConfig, payload: { prompt: string; size: string; images: RefImage[]; resolution?: string; quality?: string; signal?: AbortSignal }) {
