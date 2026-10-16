@@ -1,4 +1,5 @@
 import * as FileSystem from 'expo-file-system/legacy';
+import { extractGeminiImageUrl } from './image-response';
 
 export const DEFAULT_API_BASE = 'https://pucoding.com';
 export const DEFAULT_IMAGE_MODEL = 'gpt-image-2.5-flare';
@@ -99,12 +100,12 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutM
 }
 
 function normalizeBaseUrl(input: string) {
-  return String(input || '').trim().replace(/\/v1\/?$/, '').replace(/\/$/, '');
+  return String(input || '').trim().replace(/\/+$/, '').replace(/\/v1(?:beta)?$/, '');
 }
 
 // Gemini 官方地址常带 /v1beta 后缀，统一剥掉后由各调用方自行拼版本段。
 function normalizeGeminiBaseUrl(input: string) {
-  return String(input || '').trim().replace(/\/v1beta\/?$/, '').replace(/\/v1\/?$/, '').replace(/\/$/, '');
+  return normalizeBaseUrl(input);
 }
 
 function headersFor(config: DirectApiConfig, json = true) {
@@ -123,15 +124,16 @@ function geminiHeaders(config: { apiKey: string }, json = true) {
 }
 
 async function readAsBase64(uri: string): Promise<string> {
-  if (!uri) return '';
+  if (!uri) throw new Error('参考图地址为空');
   if (/^data:/i.test(uri)) {
     const idx = uri.indexOf('base64,');
-    return idx >= 0 ? uri.slice(idx + 7) : '';
+    if (idx < 0) throw new Error('参考图不是有效的 Base64 图片');
+    return uri.slice(idx + 7);
   }
   try {
     return await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
   } catch {
-    return '';
+    throw new Error('无法读取参考图，请重新选择图片');
   }
 }
 
@@ -479,6 +481,11 @@ function revisedPromptFromResponse(data: Json) {
 }
 
 function assertImageResult(data: Json): GenerateResult {
+  const geminiUrl = extractGeminiImageUrl(data);
+  if (geminiUrl) return { type: 'image', url: geminiUrl };
+  if (Array.isArray(data.candidates)) {
+    throw new Error('接口未返回图片，请确认所选模型支持生图；返回的是文本或内容被拦截。');
+  }
   const found = pickImageCandidate(data);
   const url = normalizeImageUrl(found?.url || imageUrlFromResponse(data), normalizeBaseUrl((data as any)?.baseUrl || DEFAULT_API_BASE));
   if (!url) {
@@ -572,29 +579,6 @@ async function generateImageGemini(config: DirectApiConfig, payload: { prompt: s
   let json: any = {};
   try { json = text ? JSON.parse(text) : {}; } catch { json = { raw: text }; }
   if (!res.ok || json.error) throw new Error(json.error?.message || json.error || json.raw || `HTTP ${res.status}`);
-  const candidates = Array.isArray(json.candidates) ? json.candidates : [];
-  for (const c of candidates) {
-    const cparts = c?.content?.parts;
-    if (!Array.isArray(cparts)) continue;
-    for (const p of cparts) {
-      const inline = p?.inlineData || p?.inline_data;
-      const b64 = inline?.data;
-      if (typeof b64 === 'string' && b64) {
-        const mime = inline.mimeType || inline.mime_type || 'image/png';
-        return { type: 'image', url: `data:${mime};base64,${b64}` };
-      }
-      // 部分 Gemini 中转站不回 inlineData，而是把生成图片放在 fileData.fileUri；
-      // 也有实现同时在 text 中返回同一 HTTP 图片地址。
-      const fileData = p?.fileData || p?.file_data;
-      const fileUri = fileData?.fileUri || fileData?.file_uri;
-      if (typeof fileUri === 'string' && /^https?:\/\//i.test(fileUri.trim())) {
-        return { type: 'image', url: fileUri.trim() };
-      }
-      if (typeof p?.text === 'string' && /^https?:\/\/\S+$/i.test(p.text.trim())) {
-        return { type: 'image', url: p.text.trim() };
-      }
-    }
-  }
   // 兜底：个别中转网关会把 Gemini 结果包装成 b64_json / url 结构。
   (json as any).baseUrl = baseUrl;
   return assertImageResult(json);

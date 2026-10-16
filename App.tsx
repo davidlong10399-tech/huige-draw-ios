@@ -364,11 +364,9 @@ export default function App() {
       apiKey: imageApiKey,
       imageModel,
       assistantModel: textModel,
-      imageProtocol:
-        imageModelOptions.find((m) => m.id === imageModel)?.protocol ??
-        inferImageProtocol(imageModel),
+      imageProtocol,
     }),
-    [imageApiBase, imageApiKey, imageModel, textModel, imageModelOptions],
+    [imageApiBase, imageApiKey, imageModel, textModel, imageProtocol],
   );
   const textConfig: DirectApiConfig = useMemo(
     () => ({
@@ -639,34 +637,34 @@ export default function App() {
   }
 
   function toggleFetchedModel(id: string) {
-    setImageModelOptions((prev) => {
-      const exists = prev.some((m) => m.id === id);
-      if (exists) {
-        // 至少保留一个可用模型；若移除的是当前模型则回落到第一个。
-        const next = prev.filter((m) => m.id !== id);
-        if (!next.length) return prev;
-        setImageModel((cur) => (cur === id ? next[0].id : cur));
-        return next;
+    const exists = imageModelOptions.some((m) => m.id === id);
+    if (exists) {
+      const next = imageModelOptions.filter((m) => m.id !== id);
+      if (!next.length) return;
+      setImageModelOptions(next);
+      if (imageModel === id) {
+        setImageModel(next[0].id);
+        setImageProtocol(next[0].protocol);
       }
-      return [
-        ...prev,
-        { id, protocol: imageProtocol },
-      ];
-    });
+    } else {
+      setImageModelOptions([...imageModelOptions, { id, protocol: imageProtocol }]);
+    }
   }
 
   function applyProtocol(next: ImageProtocol) {
     setImageProtocol(next);
+    setImageModelOptions((prev) => prev.map((m) =>
+      m.id === imageModel ? { ...m, protocol: next } : m,
+    ));
     setFetchedImageModels([]);
   }
 
   // 选中模型时同步协议状态，保证拉取模型与生成请求走同一协议。
   function selectImageModel(id: string) {
+    const model = imageModelOptions.find((m) => m.id === id);
+    const nextProtocol = model?.protocol ?? inferImageProtocol(id);
     setImageModel(id);
-    const p =
-      imageModelOptions.find((m) => m.id === id)?.protocol ??
-      inferImageProtocol(id);
-    setImageProtocol(p);
+    setImageProtocol(nextProtocol);
   }
 
   async function pickImages() {
@@ -1520,7 +1518,12 @@ export default function App() {
                         </View>
                       </View>
                     )}
-                    <View style={styles.presets}>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator
+                      contentContainerStyle={styles.modelPresetRow}
+                      style={styles.modelPresetScroll}
+                    >
                       {imageModelOptions.map((m) => {
                         const active = imageModel === m.id;
                         return (
@@ -1535,7 +1538,7 @@ export default function App() {
                           </Pressable>
                         );
                       })}
-                    </View>
+                    </ScrollView>
                   </View>
                 )}
                 <Pressable
@@ -3190,6 +3193,8 @@ const styles = StyleSheet.create({
     borderBottomColor: "rgba(255,255,255,.11)",
   },
   presets: { flexDirection: "row", gap: 8, marginTop: 12, marginBottom: 4 },
+  modelPresetScroll: { marginTop: 12, marginBottom: 4, maxWidth: "100%" },
+  modelPresetRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingRight: 20 },
   preset: {
     ...plain,
     borderRadius: 999,
