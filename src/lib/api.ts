@@ -1,3 +1,5 @@
+import * as FileSystem from 'expo-file-system/legacy';
+
 export const DEFAULT_API_BASE = 'https://pucoding.com';
 export const DEFAULT_IMAGE_MODEL = 'gpt-image-2.5-flare';
 export const DEFAULT_ASSISTANT_MODEL = 'claude-sonnet-4-6';
@@ -18,8 +20,54 @@ export const DEFAULT_IMAGE_QUALITY: (typeof IMAGE_QUALITY_OPTIONS)[number] = 'au
 
 export type AssistantResult = { message: string; chips: string[]; model?: string };
 export type GenerateResult = { id?: string; type: 'image'; url: string; localUri?: string; prompt?: string; revised_prompt?: string; elapsed?: number; createdAt?: number };
-export type DirectApiConfig = { apiBase: string; apiKey: string; imageModel: string; assistantModel: string };
+// 生图协议：openai = OpenAI 兼容 Images API（GPT / Grok / 各类中转），
+// gemini = Google generateContent / inlineData（gemini-*-image、imagen 系列）。
+export type ImageProtocol = 'openai' | 'gemini';
+export type ImageModelOption = { id: string; protocol: ImageProtocol };
+export type DirectApiConfig = { apiBase: string; apiKey: string; imageModel: string; assistantModel: string; imageProtocol?: ImageProtocol };
 export type RefImage = { name: string; uri: string; mimeType?: string };
+
+// 模型品牌归类：用于主页创作工具的 GPT / Grok / Gemini 标签与配色。
+export type ImageModelBrand = 'gpt' | 'grok' | 'gemini' | 'custom';
+export function imageModelBrand(model?: string): ImageModelBrand {
+  const m = String(model || '').toLowerCase();
+  if (/gpt-image|gpt-4o|dall-e|dalle|openai/.test(m)) return 'gpt';
+  if (m.includes('grok')) return 'grok';
+  if (/gemini|imagen/.test(m)) return 'gemini';
+  return 'custom';
+}
+
+// 未显式记录协议时按模型名推断：gemini / imagen 走 Gemini 协议，其余走 OpenAI 兼容。
+export function inferImageProtocol(model?: string): ImageProtocol {
+  return /gemini|imagen/i.test(String(model || '')) ? 'gemini' : 'openai';
+}
+
+// 主页模型 chip 的短标签：把长模型 ID 压成 “GPT Flare / Grok 2 Image / Gemini 2.5 Flash”。
+export function imageModelChipLabel(model: string): string {
+  const m = String(model || '').toLowerCase();
+  if (m.includes('gpt-image')) {
+    if (m.includes('flare')) return 'GPT Flare';
+    if (m.includes('sunburst')) return 'GPT Sunburst';
+    if (m.includes('2.5')) return 'GPT 2.5';
+    if (m.includes('2')) return 'GPT Image 2';
+    return 'GPT Image';
+  }
+  if (m.includes('grok')) {
+    const v = m.match(/grok-?([0-9][\w.]*)/);
+    const flavor = /image|imagine/.test(m) ? ' Image' : '';
+    return `Grok ${v?.[1] || ''}${flavor}`.replace(/\s+/g, ' ').trim();
+  }
+  if (m.includes('gemini')) {
+    const v = m.match(/gemini-?([0-9][\w.]*)/);
+    const flavor = /flash/.test(m) ? ' Flash' : /pro/.test(m) ? ' Pro' : '';
+    return `Gemini ${v?.[1] || ''}${flavor}`.replace(/\s+/g, ' ').trim();
+  }
+  if (m.includes('imagen')) {
+    const v = m.match(/imagen-?([0-9][\w.]*)/);
+    return `Imagen ${v?.[1] || ''}`.replace(/\s+/g, ' ').trim();
+  }
+  return model.length > 16 ? model.slice(0, 15) + '…' : model;
+}
 
 type Json = Record<string, any>;
 
@@ -54,11 +102,37 @@ function normalizeBaseUrl(input: string) {
   return String(input || '').trim().replace(/\/v1\/?$/, '').replace(/\/$/, '');
 }
 
+// Gemini 官方地址常带 /v1beta 后缀，统一剥掉后由各调用方自行拼版本段。
+function normalizeGeminiBaseUrl(input: string) {
+  return String(input || '').trim().replace(/\/v1beta\/?$/, '').replace(/\/v1\/?$/, '').replace(/\/$/, '');
+}
+
 function headersFor(config: DirectApiConfig, json = true) {
   const headers: Record<string, string> = {};
   if (json) headers['Content-Type'] = 'application/json';
   if (config.apiKey?.trim()) headers.Authorization = `Bearer ${config.apiKey.trim()}`;
   return headers;
+}
+
+// Gemini 认证走 x-goog-api-key，不用 Bearer。
+function geminiHeaders(config: { apiKey: string }, json = true) {
+  const headers: Record<string, string> = {};
+  if (json) headers['Content-Type'] = 'application/json';
+  if (config.apiKey?.trim()) headers['x-goog-api-key'] = config.apiKey.trim();
+  return headers;
+}
+
+async function readAsBase64(uri: string): Promise<string> {
+  if (!uri) return '';
+  if (/^data:/i.test(uri)) {
+    const idx = uri.indexOf('base64,');
+    return idx >= 0 ? uri.slice(idx + 7) : '';
+  }
+  try {
+    return await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+  } catch {
+    return '';
+  }
 }
 
 function firstString(...values: any[]): string {
@@ -441,14 +515,64 @@ function isGptImageModel(model?: string) {
   return /gpt-image/i.test(String(model || ''));
 }
 
+// Gemini 协议生图（含以图改图）：参考图以 inlineData parts 传入，
+// 图片从 candidates[].content.parts[].inlineData.data（base64）解析。
+async function generateImageGemini(config: DirectApiConfig, payload: { prompt: string; size: string; signal?: AbortSignal; images?: RefImage[] }): Promise<GenerateResult> {
+  const baseUrl = normalizeGeminiBaseUrl(config.apiBase);
+  const parts: Record<string, unknown>[] = [];
+  for (const img of payload.images || []) {
+    const data = await readAsBase64(img.uri);
+    if (data) parts.push({ inlineData: { mimeType: img.mimeType || 'image/png', data } });
+  }
+  parts.push({ text: payload.prompt });
+  const generationConfig: Record<string, unknown> = { responseModalities: ['TEXT', 'IMAGE'] };
+  if (payload.size && /^\d+:\d+$/.test(payload.size)) {
+    generationConfig.imageConfig = { aspectRatio: payload.size };
+  }
+  const body = { contents: [{ role: 'user', parts }], generationConfig };
+  const res = await fetchWithTimeout(`${baseUrl}/v1beta/models/${encodeURIComponent(config.imageModel)}:generateContent`, {
+    method: 'POST',
+    headers: geminiHeaders(config),
+    body: JSON.stringify(body),
+    signal: payload.signal,
+  });
+  const text = await res.text();
+  let json: any = {};
+  try { json = text ? JSON.parse(text) : {}; } catch { json = { raw: text }; }
+  if (!res.ok || json.error) throw new Error(json.error?.message || json.error || json.raw || `HTTP ${res.status}`);
+  const candidates = Array.isArray(json.candidates) ? json.candidates : [];
+  for (const c of candidates) {
+    const cparts = c?.content?.parts;
+    if (!Array.isArray(cparts)) continue;
+    for (const p of cparts) {
+      const inline = p?.inlineData || p?.inline_data;
+      const b64 = inline?.data;
+      if (typeof b64 === 'string' && b64) {
+        const mime = inline.mimeType || inline.mime_type || 'image/png';
+        return { type: 'image', url: `data:${mime};base64,${b64}` };
+      }
+    }
+  }
+  // 兜底：个别中转网关会把 Gemini 结果包装成 b64_json / url 结构。
+  (json as any).baseUrl = baseUrl;
+  return assertImageResult(json);
+}
+
 export async function generateImage(config: DirectApiConfig, payload: { prompt: string; size: string; resolution?: string; quality?: string; signal?: AbortSignal }) {
+  const protocol = config.imageProtocol || inferImageProtocol(config.imageModel);
+  if (protocol === 'gemini') return generateImageGemini(config, payload);
   const baseUrl = normalizeBaseUrl(config.apiBase);
   const px = sizeValue(payload.size, payload.resolution);
   const quality = payload.quality?.trim();
   const body: Record<string, unknown> = { model: config.imageModel, prompt: payload.prompt, n: 1, size: px };
   if (isGptImageModel(config.imageModel) && quality) body.quality = quality;
+  // Grok 官方 Images API 不接受 size/quality，先带参数请求，被拒后降级重试一次。
+  const grokFallback = /grok/i.test(config.imageModel)
+    ? [{ path: '/v1/images/generations', body: { model: config.imageModel, prompt: payload.prompt, n: 1 } }]
+    : [];
   const attempts = [
     { path: '/v1/images/generations', body },
+    ...grokFallback,
     { path: '/v1/images/generate', body: { model: config.imageModel, prompt: payload.prompt, size: px } },
   ];
   let lastErr = '';
@@ -467,6 +591,8 @@ export async function generateImage(config: DirectApiConfig, payload: { prompt: 
 
 export async function editImage(config: DirectApiConfig, payload: { prompt: string; size: string; images: RefImage[]; resolution?: string; quality?: string; signal?: AbortSignal }) {
   if (!payload.images?.length) throw new Error('参考图编辑需要先上传图片');
+  const protocol = config.imageProtocol || inferImageProtocol(config.imageModel);
+  if (protocol === 'gemini') return generateImageGemini(config, payload);
   const baseUrl = normalizeBaseUrl(config.apiBase);
   const quality = payload.quality?.trim();
   let lastErr = '';
@@ -519,26 +645,74 @@ export async function optimizePrompt(config: DirectApiConfig, prompt: string) {
   return { optimized: raw || prompt, source: 'ai', model: config.assistantModel };
 }
 
-export async function health(config: DirectApiConfig) {
+// 拉取可用模型列表：
+// - openai 协议：GET {base}/v1/models（GPT / Grok / 中转网关通用）
+// - gemini 协议：GET {base}/v1beta/models，按名称与能力过滤出图像模型
+const IMAGE_LIKE_MODEL = /image|imagen|dall-e|dalle|flux|stable-diffusion|sdxl|sd3|midjourney|recraft|ideogram|seedream|seededit|cogview|wanx|kolors|hidream|photon|banana/i;
+const MODELS_FETCH_TIMEOUT_MS = 60_000;
+
+export async function fetchImageModels(config: { apiBase: string; apiKey: string; protocol?: ImageProtocol }): Promise<string[]> {
+  const protocol = config.protocol || 'openai';
+  if (protocol === 'gemini') {
+    const baseUrl = normalizeGeminiBaseUrl(config.apiBase);
+    const res = await fetchWithTimeout(`${baseUrl}/v1beta/models?pageSize=1000`, {
+      headers: geminiHeaders(config, false),
+    }, MODELS_FETCH_TIMEOUT_MS);
+    const text = await res.text();
+    let json: any = {};
+    try { json = text ? JSON.parse(text) : {}; } catch { json = { raw: text }; }
+    if (!res.ok || json.error) throw new Error(json.error?.message || json.error || json.raw || `HTTP ${res.status}`);
+    const models = Array.isArray(json.models) ? json.models : [];
+    const ids: string[] = models
+      .map((m: any) => {
+        const id = String(m?.name || '').replace(/^models\//, '').trim();
+        const methods = Array.isArray(m?.supportedGenerationMethods) ? m.supportedGenerationMethods : [];
+        return { id, imageLike: IMAGE_LIKE_MODEL.test(id) || methods.includes('predict') };
+      })
+      .filter((x: { id: string; imageLike: boolean }) => x.id && x.imageLike)
+      .map((x: { id: string }) => x.id);
+    return Array.from(new Set(ids)).sort();
+  }
   const baseUrl = normalizeBaseUrl(config.apiBase);
-  const attempts = [
-    '/v1/health',
-    '/v1/models',
-  ];
+  const res = await fetchWithTimeout(`${baseUrl}/v1/models`, {
+    headers: headersFor(config as DirectApiConfig, false),
+  }, MODELS_FETCH_TIMEOUT_MS);
+  const text = await res.text();
+  let json: any = {};
+  try { json = text ? JSON.parse(text) : {}; } catch { json = { raw: text }; }
+  if (!res.ok || json.error) throw new Error(json.error?.message || json.error || json.raw || `HTTP ${res.status}`);
+  const pool = Array.isArray(json.data) ? json.data : Array.isArray(json.models) ? json.models : [];
+  const ids: string[] = pool
+    .map((m: any) => (typeof m === 'string' ? m : String(m?.id || m?.name || '').replace(/^models\//, '').trim()))
+    .filter(Boolean);
+  // 图像相关模型排前面，纯文本模型靠后，避免长列表里找不到生图模型。
+  return Array.from(new Set(ids))
+    .sort((a, b) => Number(IMAGE_LIKE_MODEL.test(b)) - Number(IMAGE_LIKE_MODEL.test(a)) || a.localeCompare(b))
+    .slice(0, 120);
+}
+
+export async function health(config: DirectApiConfig) {
+  const protocol = config.imageProtocol || inferImageProtocol(config.imageModel);
+  const attempts = protocol === 'gemini'
+    ? [{ base: normalizeGeminiBaseUrl(config.apiBase), path: '/v1beta/models', headers: geminiHeaders(config, false) }]
+    : [
+        { base: normalizeBaseUrl(config.apiBase), path: '/v1/health', headers: config.apiKey?.trim() ? { Authorization: `Bearer ${config.apiKey.trim()}` } as Record<string, string> : {} },
+        { base: normalizeBaseUrl(config.apiBase), path: '/v1/models', headers: config.apiKey?.trim() ? { Authorization: `Bearer ${config.apiKey.trim()}` } as Record<string, string> : {} },
+      ];
   let lastErr = '';
-  for (const path of attempts) {
+  for (const attempt of attempts) {
     try {
-      const res = await fetchWithTimeout(`${baseUrl}${path}`, {
-        headers: config.apiKey?.trim() ? { Authorization: `Bearer ${config.apiKey.trim()}` } : undefined,
+      const res = await fetchWithTimeout(`${attempt.base}${attempt.path}`, {
+        headers: attempt.headers,
       }, HEALTH_TIMEOUT_MS);
       const text = await res.text();
       let json: any = {};
       try { json = text ? JSON.parse(text) : {}; } catch { json = { raw: text }; }
       if (!res.ok) throw new Error(json.error?.message || json.error || json.raw || `HTTP ${res.status}`);
-      return { ok: true, baseUrl, imageModel: config.imageModel, optimizerModel: config.assistantModel, raw: json };
+      return { ok: true, baseUrl: attempt.base, imageModel: config.imageModel, optimizerModel: config.assistantModel, raw: json };
     } catch (e: any) {
       lastErr = String(e?.message || e);
     }
   }
-  return { ok: false, baseUrl, imageModel: config.imageModel, optimizerModel: config.assistantModel, error: lastErr };
+  return { ok: false, baseUrl: attempts[0].base, imageModel: config.imageModel, optimizerModel: config.assistantModel, error: lastErr };
 }

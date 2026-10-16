@@ -35,6 +35,9 @@ import {
   editImage,
   generateImage,
   health,
+  fetchImageModels,
+  imageModelChipLabel,
+  inferImageProtocol,
   DEFAULT_API_BASE,
   DEFAULT_ASSISTANT_MODEL,
   DEFAULT_IMAGE_MODEL,
@@ -43,6 +46,8 @@ import {
   GenerateResult,
   IMAGE_MODEL_PRESETS,
   IMAGE_QUALITY_OPTIONS,
+  ImageModelOption,
+  ImageProtocol,
   optimizePrompt,
   RefImage,
 } from "./src/lib/api";
@@ -56,6 +61,8 @@ type SavedConfig = {
   imageApiKey?: string;
   imageModel?: string;
   imageQuality?: string;
+  imageProtocol?: string;
+  imageModels?: { id?: string; protocol?: string }[];
   textApiBase?: string;
   textApiKey?: string;
   textModel?: string;
@@ -71,6 +78,10 @@ const CONFIG_KEY = "huige-draw-direct-config-v4";
 const LEGACY_CONFIG_KEY = "huige-draw-direct-config-v3";
 const HISTORY_KEY = "huige-draw-history-v3";
 const MAX_HISTORY = 50;
+// 默认可选模型：内置 GPT 预设三件套，拉取模型后由用户勾选覆盖。
+const DEFAULT_IMAGE_MODEL_OPTIONS: ImageModelOption[] = IMAGE_MODEL_PRESETS.map(
+  (p) => ({ id: p.id, protocol: "openai" as const }),
+);
 const DEFAULT_DIRECT_API_BASE =
   process.env.EXPO_PUBLIC_HUIGE_API_BASE || "https://ai.beehears.com/v1";
 const DEFAULT_DIRECT_API_KEY = process.env.EXPO_PUBLIC_HUIGE_API_KEY || "";
@@ -301,6 +312,12 @@ export default function App() {
   const [imageApiBase, setImageApiBase] = useState(DEFAULT_IMAGE_API_BASE);
   const [imageApiKey, setImageApiKey] = useState(DEFAULT_IMAGE_API_KEY);
   const [imageModel, setImageModel] = useState(DEFAULT_IMAGE_MODEL_VALUE);
+  const [imageProtocol, setImageProtocol] = useState<ImageProtocol>("openai");
+  const [imageModelOptions, setImageModelOptions] = useState<ImageModelOption[]>(
+    DEFAULT_IMAGE_MODEL_OPTIONS,
+  );
+  const [fetchedImageModels, setFetchedImageModels] = useState<string[]>([]);
+  const [fetchingModels, setFetchingModels] = useState(false);
   const [imageQuality, setImageQuality] = useState<string>(DEFAULT_IMAGE_QUALITY);
   const [textApiBase, setTextApiBase] = useState(DEFAULT_TEXT_API_BASE);
   const [textApiKey, setTextApiKey] = useState(DEFAULT_TEXT_API_KEY);
@@ -347,8 +364,11 @@ export default function App() {
       apiKey: imageApiKey,
       imageModel,
       assistantModel: textModel,
+      imageProtocol:
+        imageModelOptions.find((m) => m.id === imageModel)?.protocol ??
+        inferImageProtocol(imageModel),
     }),
-    [imageApiBase, imageApiKey, imageModel, textModel],
+    [imageApiBase, imageApiKey, imageModel, textModel, imageModelOptions],
   );
   const textConfig: DirectApiConfig = useMemo(
     () => ({
@@ -419,6 +439,24 @@ export default function App() {
               ? c.imageModel
               : DEFAULT_IMAGE_MODEL_VALUE;
           setImageModel(savedModel);
+          setImageProtocol(
+            c.imageProtocol === "gemini" || c.imageProtocol === "openai"
+              ? c.imageProtocol
+              : inferImageProtocol(savedModel),
+          );
+          // 拉取模型勾选列表：旧存档无此字段时回落到内置 GPT 预设三件套。
+          if (Array.isArray(c.imageModels)) {
+            const opts: ImageModelOption[] = c.imageModels
+              .filter((m) => typeof m?.id === "string" && m.id.trim())
+              .map((m) => ({
+                id: (m.id as string).trim(),
+                protocol:
+                  m.protocol === "gemini" || m.protocol === "openai"
+                    ? m.protocol
+                    : inferImageProtocol(m.id),
+              }));
+            setImageModelOptions(opts.length ? opts : DEFAULT_IMAGE_MODEL_OPTIONS);
+          }
           const savedQuality = (IMAGE_QUALITY_OPTIONS as readonly string[]).includes(c.imageQuality || "")
             ? (c.imageQuality as string)
             : DEFAULT_IMAGE_QUALITY;
@@ -476,6 +514,8 @@ export default function App() {
         imageApiKey,
         imageModel,
         imageQuality,
+        imageProtocol,
+        imageModels: imageModelOptions,
         textApiBase,
         textApiKey,
         textModel,
@@ -490,6 +530,8 @@ export default function App() {
     imageApiKey,
     imageModel,
     imageQuality,
+    imageProtocol,
+    imageModelOptions,
     textApiBase,
     textApiKey,
     textModel,
@@ -573,6 +615,59 @@ export default function App() {
       setConnected(`生图连接失败: ${e.message}`);
     }
   }, [imageApiKey, imageConfig, imageModel]);
+
+  // 拉取服务端可用生图模型：openai 协议走 /v1/models，gemini 协议走 /v1beta/models。
+  // 拉取成功后与内置 GPT 预设合并去重，用户再按需勾选进 imageModelOptions。
+  async function fetchModels() {
+    if (!imageApiBase.trim() || !imageApiKey.trim()) {
+      return Alert.alert("先配置生图接口", "拉取模型需要先填写 Base 地址和 API Key。");
+    }
+    setFetchingModels(true);
+    try {
+      const list = await fetchImageModels({
+        apiBase: imageApiBase,
+        apiKey: imageApiKey,
+        protocol: imageProtocol,
+      });
+      setFetchedImageModels(list);
+      if (!list.length) Alert.alert("未发现生图模型", "该接口未返回图像相关模型，可手动切换协议或手动填写模型名。");
+    } catch (e: any) {
+      Alert.alert("拉取模型失败", e?.message || String(e));
+    } finally {
+      setFetchingModels(false);
+    }
+  }
+
+  function toggleFetchedModel(id: string) {
+    setImageModelOptions((prev) => {
+      const exists = prev.some((m) => m.id === id);
+      if (exists) {
+        // 至少保留一个可用模型；若移除的是当前模型则回落到第一个。
+        const next = prev.filter((m) => m.id !== id);
+        if (!next.length) return prev;
+        setImageModel((cur) => (cur === id ? next[0].id : cur));
+        return next;
+      }
+      return [
+        ...prev,
+        { id, protocol: imageProtocol },
+      ];
+    });
+  }
+
+  function applyProtocol(next: ImageProtocol) {
+    setImageProtocol(next);
+    setFetchedImageModels([]);
+  }
+
+  // 选中模型时同步协议状态，保证拉取模型与生成请求走同一协议。
+  function selectImageModel(id: string) {
+    setImageModel(id);
+    const p =
+      imageModelOptions.find((m) => m.id === id)?.protocol ??
+      inferImageProtocol(id);
+    setImageProtocol(p);
+  }
 
   async function pickImages() {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -1067,6 +1162,29 @@ export default function App() {
                 </View>
 
                 <View style={styles.toolRail}>
+                  <Text style={styles.railLabel}>模型</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.optionRow}>
+                    {imageModelOptions.map((m) => {
+                      const active = imageModel === m.id;
+                      return (
+                        <Pressable
+                          key={m.id}
+                          style={[styles.modelChip, active && styles.modelChipActive]}
+                          onPress={() => selectImageModel(m.id)}
+                        >
+                          <Text style={[styles.modelChipText, active && styles.modelChipTextActive]}>
+                            {imageModelChipLabel(m.id)}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                    {!imageModelOptions.length && (
+                      <Text style={styles.modelChipEmpty}>在「我的配置」里拉取或勾选生图模型</Text>
+                    )}
+                  </ScrollView>
+                </View>
+
+                <View style={styles.toolRail}>
                   <Text style={styles.railLabel}>尺寸</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.optionRow}>
                     {sizeOptions.map((r) => {
@@ -1335,10 +1453,84 @@ export default function App() {
                           <Pressable
                             key={m.id}
                             style={[styles.preset, active && styles.presetActive]}
-                            onPress={() => setImageModel(m.id)}
+                            onPress={() => selectImageModel(m.id)}
                           >
                             <Text style={[styles.presetText, active && styles.presetTextActive]}>
                               {m.label}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                    <View style={styles.presets}>
+                      {(["openai", "gemini"] as ImageProtocol[]).map((p) => {
+                        const active = imageProtocol === p;
+                        return (
+                          <Pressable
+                            key={p}
+                            style={[styles.preset, active && styles.presetActive]}
+                            onPress={() => applyProtocol(p)}
+                          >
+                            <Text style={[styles.presetText, active && styles.presetTextActive]}>
+                              {p === "openai" ? "OpenAI/Grok 协议" : "Gemini 协议"}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                    <View style={styles.fetchModelsRow}>
+                      <Pressable
+                        style={[styles.fetchModelsBtn, fetchingModels && styles.disabled]}
+                        onPress={fetchModels}
+                        disabled={fetchingModels}
+                      >
+                        <Text style={styles.fetchModelsText}>
+                          {fetchingModels ? "拉取中…" : "拉取模型"}
+                        </Text>
+                      </Pressable>
+                      <Text style={styles.fetchModelsHint}>
+                        按当前协议从接口获取可用生图模型
+                      </Text>
+                    </View>
+                    {fetchedImageModels.length > 0 && (
+                      <View style={styles.modelPickList}>
+                        <Text style={styles.modelPickTitle}>
+                          勾选需要出现在创作工具里的模型
+                        </Text>
+                        <ScrollView style={styles.modelPickScroll} nestedScrollEnabled>
+                          {fetchedImageModels.map((id) => {
+                            const checked = imageModelOptions.some((m) => m.id === id);
+                            return (
+                              <Pressable
+                                key={id}
+                                style={styles.modelPickItem}
+                                onPress={() => toggleFetchedModel(id)}
+                              >
+                                <Ionicons
+                                  name={checked ? "checkbox" : "square-outline"}
+                                  size={18}
+                                  color={checked ? C.purple : C.muted}
+                                />
+                                <Text style={styles.modelPickId} numberOfLines={2}>
+                                  {id}
+                                </Text>
+                              </Pressable>
+                            );
+                          })}
+                        </ScrollView>
+                      </View>
+                    )}
+                    <View style={styles.presets}>
+                      {imageModelOptions.map((m) => {
+                        const active = imageModel === m.id;
+                        return (
+                          <Pressable
+                            key={m.id}
+                            style={[styles.preset, active && styles.presetActive]}
+                            onPress={() => selectImageModel(m.id)}
+                          >
+                            <Text style={[styles.presetText, active && styles.presetTextActive]}>
+                              {imageModelChipLabel(m.id)}
                             </Text>
                           </Pressable>
                         );
@@ -2175,6 +2367,56 @@ const styles = StyleSheet.create({
   },
   miniChipText: { color: C.muted, fontSize: 11, fontWeight: "900" },
   miniChipTextActive: { color: C.purple, fontSize: 11, fontWeight: "900" },
+  modelChip: {
+    height: 30,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(8,12,28,.68)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,.08)",
+  },
+  modelChipActive: {
+    backgroundColor: "rgba(142,162,255,.18)",
+    borderColor: "rgba(142,162,255,.55)",
+  },
+  modelChipText: { color: C.muted, fontSize: 12, fontWeight: "900" },
+  modelChipTextActive: { color: C.purple, fontSize: 12, fontWeight: "900" },
+  modelChipEmpty: { color: C.muted, fontSize: 11, fontWeight: "700" },
+  fetchModelsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginTop: 10,
+  },
+  fetchModelsBtn: {
+    height: 36,
+    borderRadius: 999,
+    paddingHorizontal: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: C.purple,
+  },
+  fetchModelsText: { color: "#111827", fontSize: 12, fontWeight: "900" },
+  fetchModelsHint: { color: C.muted, fontSize: 11, fontWeight: "700", flex: 1 },
+  modelPickList: {
+    marginTop: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: C.hairSoft,
+    backgroundColor: "rgba(255,255,255,.04)",
+    padding: 10,
+  },
+  modelPickTitle: { color: C.ink, fontSize: 12, fontWeight: "900", marginBottom: 8 },
+  modelPickScroll: { maxHeight: 220 },
+  modelPickItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 7,
+  },
+  modelPickId: { color: C.ink, fontSize: 12, fontWeight: "700", flex: 1 },
   composerBottom: {
     flexDirection: "row",
     gap: 8,
